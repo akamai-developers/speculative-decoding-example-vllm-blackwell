@@ -1,0 +1,25 @@
+#cloud-config
+# Prep the development environment with necessary packages and NVIDIA drivers
+package_update: true
+package_upgrade: true
+
+packages:
+  - build-essential
+  - git
+  - curl
+  - wget
+  - htop
+  - tmux
+  - nvtop
+  - python3-pip
+  - python3-venv
+  - dkms
+
+runcmd:
+  - apt-get update -y
+  - apt-get install -y linux-headers-$(uname -r) build-essential dkms
+  - apt-get purge -y '*nvidia*' || true
+  - apt-get autoremove -y
+  - apt-get install -y nvidia-driver-595-open
+  - echo "NVIDIA open driver installed. Rebooting..." | tee /root/cloud-init-vllm.log
+  - reboot
