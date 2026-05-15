@@ -19,7 +19,7 @@ runcmd:
   - apt-get purge -y '*nvidia*' || true
   - apt-get autoremove -y
   - apt-get install -y nvidia-driver-595-open
-  - git clone https://${github_username}:${github_token}@${repo_url} /root/vllm-speculative-demo
+  - git clone ${repo_url} /root/vllm-speculative-demo
 
   # Make SSH sessions land in the project directory
   - echo 'cd /root/vllm-speculative-demo' >> /root/.bashrc

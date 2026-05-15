@@ -50,14 +50,3 @@ variable "hf_token" {
   description = "Hugging Face token."
   sensitive   = true
 }
-
-variable "github_token" {
-  type      = string
-  description = "GitHub access token"
-  sensitive = true
-}
-
-variable "github_username" {
-  type = string
-  description = "Your GitHub username"
-}
