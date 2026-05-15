@@ -1,79 +1,136 @@
-# speculative-decoding-example-vllm-blackwell
+# vLLM Speculative Decoding Observability Demo
 
-# GPU Environment Setup on Linode RTX 6000 Blackwell
-This guide walks through provisioning a Linode GPU instance with an NVIDIA RTX 6000 Blackwell GPU, installing the required NVIDIA open kernel drivers, and preparing a Python development environment for running inference workloads with vLLM.
+This project provisions an NVIDIA RTX PRO 6000 Blackwell GPU instance on Akamai Cloud / Linode using Terraform and prepares the environment for running and visualizing speculative decoding with vLLM.
 
+The goal of the project is to compare:
 
-## 1. Create a Linode GPU Instance
+* Standard target-only decoding
+* Speculative decoding using a draft + target model pair
 
-Create a new Linode instance with the following configuration:
+and expose:
 
-- **GPU:** NVIDIA RTX 6000 Blackwell
-- **OS:** Ubuntu 22.04 LTS
-- **Authentication:** SSH key
+* Throughput metrics
+* Acceptance rate metrics
+* GPU utilization
+* Latency metrics
+* Baseline vs speculative comparisons
 
-Add your SSH public key during instance creation to enable secure remote access to the instance. 
+through Grafana and a custom visualization dashboard.
 
-## 2. SSH into the Instance
+---
 
-After the instance is running, connect to it over SSH:
+# Architecture
 
-```bash
-ssh root@<your-instance-ip>
-```
-Replace <your-instance-ip> with the public IP address of your Linode instance.
-
-
-## 3. Update the System
-
-Update and upgrade the base system packages:
-
-```bash
-apt update && apt upgrade -y
-```
-
-## 4. Install Development Tools
-
-Install common development, monitoring, and Python environment tools:
-
-```bash
-apt install -y build-essential git curl wget htop tmux nvtop python3-pip python3-venv
-``` 
-
-These packages include:
-
-- **build-essential** for compiling software
-- **git** for working with repositories
-- **curl** and wget for downloading files
-- **htop** for system monitoring
-- **tmux** for persistent terminal sessions
-- **nvtop** for GPU monitoring
-- **python3-pip** and **python3-venv** for Python environments
-
-## 5. Install required NVIDIA Drivers
-
-The NVIDIA RTX 6000 Blackwell requires the NVIDIA open kernel modules instead of the standard server drivers on Ubuntu 22.04.
-
-First install the Linux kernel headers and dependencies required to build the NVIDIA kernel modules:
-
-```bash
-apt install -y linux-headers-$(uname -r) build-essential dkms
+```text
+Terraform
+  ↓
+Creates RTX PRO 6000 Blackwell GPU Instance
+  ↓
+cloud-init bootstraps Ubuntu environment
+  ↓
+NVIDIA drivers installed automatically
+  ↓
+vLLM inference services
+  ├── Baseline decoding
+  └── Speculative decoding
+  ↓
+Prometheus scrapes metrics
+  ↓
+Grafana + Streamlit visualization
 ```
 
-Install the NVIDIA open kernel driver:
+---
 
-```bash
-apt install -y nvidia-driver-595-open
-``` 
+# Repository Structure
 
-Reboot the system to load the NVIDIA kernel modules:
-```bash
-reboot
+```text
+.
+├── infra/
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── terraform.tfvars.example
+│   └── cloud-init.yaml
+│
+├── scripts/
+│   ├── setup-vllm.sh
+│   ├── download-models.sh
+│   ├── run-baseline.sh
+│   └── run-speculative.sh
+│
+├── README.md
+└── LICENSE
 ```
 
-After reconnecting, verify that the GPU is detected:
+---
+
+# Prerequisites
+
+## Local Machine
+
+Install:
+
+* Terraform
+* jq
+* curl
+* SSH client
+
+MacOS example:
+
 ```bash
-nvidia-smi
+brew tap hashicorp/tap
+brew install hashicorp/tap/terraform
+brew install jq
 ```
 
-You should see the NVIDIA RTX 6000 Blackwell listed in the output.
+Verify:
+
+```bash
+terraform version
+```
+
+---
+
+# Akamai Cloud / Linode Requirements
+
+You must have:
+
+* An Akamai Cloud / Linode account
+* Access to the RTX PRO 6000 Blackwell GPU plan
+* A Personal Access Token
+* An SSH public key
+
+---
+
+# Creating a Linode API Token
+
+Navigate to:
+
+[https://cloud.linode.com/profile/tokens](https://cloud.linode.com/profile/tokens)
+
+Create a Personal Access Token with:
+
+* Linodes: Read/Write
+* Firewalls: Read/Write
+* Events: Read/Write
+* Volumes: Read/Write
+
+Export the token locally:
+
+```bash
+export TF_VAR_linode_token="YOUR_TOKEN"
+```
+
+Terraform automatically maps:
+
+```text
+TF_VAR_linode_token
+```
+
+to the Terraform variable:
+
+```hcl
+variable "linode_token"
+```
+
+---

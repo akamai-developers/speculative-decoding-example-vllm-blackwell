@@ -59,7 +59,7 @@ resource "linode_instance" "gpu" {
   image           = "linode/ubuntu22.04"
   root_pass       = var.root_pass
   authorized_keys = [linode_sshkey.default.ssh_key]
-  firewall_id = linode_firewall.vllm_demo.id
+  firewall_id = linode_firewall.fw.id
 
   metadata {
     user_data = base64encode(file("${path.module}/cloud-init.yaml"))
