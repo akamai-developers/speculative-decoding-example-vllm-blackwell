@@ -1,0 +1,10 @@
+# Core LLM Inference
+vllm>=0.4.0
+huggingface_hub
+
+# Frontend UI & Benchmarking
+streamlit
+requests
+
+# Observability
+prometheus-client
