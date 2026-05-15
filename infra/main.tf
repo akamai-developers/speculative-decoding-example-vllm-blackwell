@@ -58,6 +58,8 @@ resource "linode_instance" "gpu" {
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml", {
       repo_url = var.repo_url
       hf_token = var.hf_token
+      github_username = var.github_username
+      github_token    = var.github_token
     }))
   }
 
