@@ -1,5 +1,4 @@
 #cloud-config
-# Prep the development environment with necessary packages and NVIDIA drivers
 package_update: true
 package_upgrade: true
 
@@ -16,10 +15,19 @@ packages:
   - dkms
 
 runcmd:
-  - apt-get update -y
   - apt-get install -y linux-headers-$(uname -r) build-essential dkms
   - apt-get purge -y '*nvidia*' || true
   - apt-get autoremove -y
   - apt-get install -y nvidia-driver-595-open
-  - echo "NVIDIA open driver installed. Rebooting..." | tee /root/cloud-init-vllm.log
-  - reboot
+  - git clone ${repo_url} /root/vllm-speculative-demo
+
+  # Make SSH sessions land in the project directory
+  - echo 'cd /root/vllm-speculative-demo' >> /root/.bashrc
+
+  # Auto-activate venv after start-demo.sh creates it
+  - echo 'if [ -f /root/vllm-speculative-demo/.venv/bin/activate ]; then source /root/vllm-speculative-demo/.venv/bin/activate; fi' >> /root/.bashrc
+
+  - echo "Setup complete. Rebooting for NVIDIA driver." | tee /root/cloud-init-vllm.log
+
+power_state:
+  mode: reboot

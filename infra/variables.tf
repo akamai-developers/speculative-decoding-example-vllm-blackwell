@@ -39,3 +39,14 @@ variable "allowed_ip_cidr" {
   description = "CIDR block allowed to access SSH/Grafana/Streamlit."
   default = "0.0.0.0/0"
 }
+
+variable "repo_url" {
+  type        = string
+  description = "Git repository cloned onto the GPU instance."
+}
+
+variable "hf_token" {
+  type        = string
+  description = "Hugging Face token."
+  sensitive   = true
+}

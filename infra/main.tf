@@ -1,10 +1,3 @@
-# Cloud infra setup for Linode instance with RTX 6000 Blackwell GPU 
-# for running a speculative decoding examples in vllm 
-#
-# What this provisions: 
-#
-#
-
 terraform {
   required_providers {
     linode = {
@@ -62,7 +55,10 @@ resource "linode_instance" "gpu" {
   firewall_id = linode_firewall.fw.id
 
   metadata {
-    user_data = base64encode(file("${path.module}/cloud-init.yaml"))
+    user_data = base64encode(templatefile("${path.module}/cloud-init.yaml", {
+      repo_url = var.repo_url
+      hf_token = var.hf_token
+    }))
   }
 
   tags = ["vllm", "speculative-decoding", "gpu"]
