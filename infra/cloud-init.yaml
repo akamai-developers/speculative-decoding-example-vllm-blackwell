@@ -27,6 +27,11 @@ runcmd:
   - apt-get update
   - apt-get install -y cuda-toolkit-13-2
 
+  # Configure CUDA environment variables for future shell sessions
+  - echo 'export CUDA_HOME=/usr/local/cuda-13.2' >> /root/.bashrc
+  - echo 'export PATH=$CUDA_HOME/bin:$PATH' >> /root/.bashrc
+  - echo 'export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH' >> /root/.bashrc
+
   # Clone project repo
   - git clone ${repo_url} /root/vllm-speculative-demo
 
