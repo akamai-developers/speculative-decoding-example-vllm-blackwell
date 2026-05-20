@@ -2,8 +2,10 @@ import time
 import requests
 import streamlit as st
 
-BASELINE_URL = "http://localhost:8000/v1/chat/completions"
-SPECULATIVE_URL = "http://localhost:8001/v1/chat/completions"
+VM_IP = os.getenv("VM_IP", "localhost")
+
+BASELINE_URL = f"http://{VM_IP}:8000/v1/chat/completions"
+SPECULATIVE_URL = f"http://{VM_IP}:8001/v1/chat/completions"
 
 st.set_page_config(
     page_title="vLLM Speculative Decoding Demo",
