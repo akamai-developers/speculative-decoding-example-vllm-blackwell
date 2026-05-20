@@ -19,7 +19,7 @@ runcmd:
   - echo "Installing NVIDIA open driver..." | tee -a /root/cloud-init-vllm.log
   - apt-get install -y nvidia-driver-595-open
 
-  - echo "Installing latestCUDA toolkit..." | tee -a /root/cloud-init-vllm.log
+  - echo "Installing latest CUDA toolkit..." | tee -a /root/cloud-init-vllm.log
   - wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb -O /tmp/cuda-keyring.deb
   - dpkg -i /tmp/cuda-keyring.deb
   - apt-get update
