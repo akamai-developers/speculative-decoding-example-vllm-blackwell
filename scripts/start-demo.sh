@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Change to project directory
 cd /root/vllm-speculative-demo
+chmod +x scripts/*.sh # make all scripts executable
+mkdir -p logs
 
-# Make all project scripts executable
-chmod +x scripts/*.sh
-
-
-# Create and activate Python virtual environment
+# Create Python .venv if it doesn't exist
 if [ ! -d ".venv" ]; then
   echo "Creating Python virtual environment..."
   python3 -m venv .venv
@@ -16,15 +13,12 @@ else
   echo "Using existing Python virtual environment..."
 fi
 
+# Activate the .venv and install GPU/server dependencies
 source .venv/bin/activate
-
-
-# Install Python dependencies
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-gpu.txt
 
-
-# Authenticate with Hugging Face
+# Hugging Face auth
 if [ -z "${HF_TOKEN:-}" ]; then
   echo "ERROR: HF_TOKEN is not set."
   echo "Run: export HF_TOKEN='hf_xxx'"
@@ -33,15 +27,9 @@ fi
 
 hf auth login --token "$HF_TOKEN"
 
-
-# Download model weights
+# Download models
 echo "Downloading models..."
 ./scripts/download-models.sh
-
-
-# Create log directory
-mkdir -p logs
-
 
 # Start vLLM servers in background
 echo "Starting baseline vLLM server..."
@@ -50,17 +38,13 @@ nohup ./scripts/run-baseline.sh > logs/baseline.log 2>&1 &
 echo "Starting speculative vLLM server..."
 nohup ./scripts/run-speculative.sh > logs/speculative.log 2>&1 &
 
-
-# Start Streamlit dashboard in background
-echo "Starting dashboard..."
-nohup ./scripts/run-dashboard.sh > logs/dashboard.log 2>&1 &
-
-
-# Print service URLs
 INSTANCE_IP=$(hostname -I | awk '{print $1}')
 
 echo ""
-echo "Demo started successfully."
+echo "vLLM servers started."
 echo "Baseline vLLM:    http://${INSTANCE_IP}:8000"
 echo "Speculative vLLM: http://${INSTANCE_IP}:8001"
-echo "Dashboard:        http://${INSTANCE_IP}:8501"
+echo ""
+echo "Check logs:"
+echo "tail -f logs/baseline.log"
+echo "tail -f logs/speculative.log"
