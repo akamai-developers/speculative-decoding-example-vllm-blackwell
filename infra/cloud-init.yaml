@@ -6,26 +6,40 @@ packages:
   - git
   - curl
   - wget
-  - htop
-  - tmux
   - nvtop
   - python3-pip
   - python3-venv
   - build-essential
   - dkms
-  - nvidia-cuda-toolkit
 
 runcmd:
+  # Install matching kernel headers before NVIDIA driver build
   - apt-get install -y linux-headers-$(uname -r)
-  - apt-get purge -y '*nvidia*' || true
-  - apt-get autoremove -y
+
+  # Install NVIDIA open driver for RTX 6000 Blackwell
+  # This provides the actual GPU driver + NVIDIA kernel modules used
+  # by Linux to communicate with the RTX 6000 Blackwell GPU.
   - apt-get install -y nvidia-driver-595-open
+
+  # Install the latest CUDA toolkit from the NVIDIA CUDA repo
+  - wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb -O /tmp/cuda-keyring.deb
+  - dpkg -i /tmp/cuda-keyring.deb
+  - apt-get update
+  - apt-get install -y cuda-toolkit-13-2
+
+  # Clone project repo
   - git clone ${repo_url} /root/vllm-speculative-demo
 
-  # Make SSH sessions land in the project directory
+  # Make future SSH sessions start in the repo dir for convenience
   - echo 'cd /root/vllm-speculative-demo' >> /root/.bashrc
 
-  # Auto-activate venv after start-demo.sh creates it
+  # Create the local Python virtual environment from the repo
+  - python3 -m venv /root/vllm-speculative-demo/.venv
+
+  # Upgrade pip and install dependencies
+  - /root/vllm-speculative-demo/.venv/bin/pip install --upgrade pip -r /root/vllm-speculative-demo/requirements.txt
+
+  # Auto-activate venv for future root shell sessions
   - echo 'if [ -f /root/vllm-speculative-demo/.venv/bin/activate ]; then source /root/vllm-speculative-demo/.venv/bin/activate; fi' >> /root/.bashrc
 
   - echo "Setup complete. Rebooting for NVIDIA driver." | tee /root/cloud-init-vllm.log
