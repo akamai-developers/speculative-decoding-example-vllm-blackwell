@@ -11,6 +11,8 @@ packages:
   - python3-venv
   - build-essential
   - dkms
+  - docker.io
+  - docker-compose
 
 runcmd:
   - echo "Installing kernel headers..." | tee -a /root/cloud-init-vllm.log
