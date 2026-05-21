@@ -35,14 +35,22 @@ resource "linode_firewall" "fw" {
     ports    = "3000"
     ipv4     = [var.allowed_ip_cidr]
   }
-
+  
   inbound {
-    label    = "streamlit"
+    label    = "allow-vllm-baseline"
     action   = "ACCEPT"
     protocol = "TCP"
-    ports    = "8501"
+    ports    = "8000"
     ipv4     = [var.allowed_ip_cidr]
-  }
+}
+
+  inbound {
+    label    = "allow-vllm-speculative"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "8001"
+    ipv4     = [var.allowed_ip_cidr]
+}
 }
 
 resource "linode_instance" "gpu" {
