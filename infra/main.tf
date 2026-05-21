@@ -37,12 +37,20 @@ resource "linode_firewall" "fw" {
   }
   
   inbound {
+    label    = "prometheus"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "9090"
+    ipv4     = [var.allowed_ip_cidr]
+  }
+
+  inbound {
     label    = "allow-vllm-baseline"
     action   = "ACCEPT"
     protocol = "TCP"
     ports    = "8000"
     ipv4     = [var.allowed_ip_cidr]
-}
+  }
 
   inbound {
     label    = "allow-vllm-speculative"
@@ -50,7 +58,7 @@ resource "linode_firewall" "fw" {
     protocol = "TCP"
     ports    = "8001"
     ipv4     = [var.allowed_ip_cidr]
-}
+  }
 }
 
 resource "linode_instance" "gpu" {
