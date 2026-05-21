@@ -1,11 +1,14 @@
 global:
   scrape_interval: 5s
+  evaluation_interval: 30s
 
 scrape_configs:
   - job_name: "vllm-baseline"
+    metrics_path: /metrics
     static_configs:
-      - targets: ["localhost:8000"]
+      - targets: ["host.docker.internal:8000"]
 
   - job_name: "vllm-speculative"
+    metrics_path: /metrics
     static_configs:
-      - targets: ["localhost:8001"]
+      - targets: ["host.docker.internal:8001"]
