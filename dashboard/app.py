@@ -1,8 +1,10 @@
 import time
 import requests
 import streamlit as st
+import os
 
 VM_IP = os.getenv("VM_IP", "localhost")
+TARGET_MODEL = os.getenv("TARGET_MODEL")
 
 BASELINE_URL = f"http://{VM_IP}:8000/v1/chat/completions"
 SPECULATIVE_URL = f"http://{VM_IP}:8001/v1/chat/completions"
@@ -23,10 +25,16 @@ prompt = st.text_area(
 max_tokens = st.slider("Max tokens", 50, 1000, 300, step=50)
 temperature = st.slider("Temperature", 0.0, 1.0, 0.0, step=0.1)
 
+if "baseline_result" not in st.session_state:
+    st.session_state.baseline_result = None
+
+if "speculative_result" not in st.session_state:
+    st.session_state.speculative_result = None
+
 
 def run_inference(url: str, prompt: str) -> dict:
     payload = {
-        "model": "default",
+        "model": TARGET_MODEL,
         "messages": [
             {"role": "user", "content": prompt}
         ],
@@ -63,10 +71,13 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Baseline")
+
     if st.button("Run Baseline"):
         with st.spinner("Running baseline inference..."):
-            result = run_inference(BASELINE_URL, prompt)
+            st.session_state.baseline_result = run_inference(BASELINE_URL, prompt)
 
+    result = st.session_state.baseline_result
+    if result:
         st.metric("Total latency", f"{result['latency']:.2f}s")
         st.metric("Generated tokens", result["completion_tokens"])
         st.metric("Tokens/sec", f"{result['tokens_per_second']:.2f}")
@@ -74,10 +85,13 @@ with col1:
 
 with col2:
     st.subheader("Speculative")
+
     if st.button("Run Speculative"):
         with st.spinner("Running speculative inference..."):
-            result = run_inference(SPECULATIVE_URL, prompt)
+            st.session_state.speculative_result = run_inference(SPECULATIVE_URL, prompt)
 
+    result = st.session_state.speculative_result
+    if result:
         st.metric("Total latency", f"{result['latency']:.2f}s")
         st.metric("Generated tokens", result["completion_tokens"])
         st.metric("Tokens/sec", f"{result['tokens_per_second']:.2f}")
