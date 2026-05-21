@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: "vllm-baseline"
+    static_configs:
+      - targets: ["localhost:8000"]
+
+  - job_name: "vllm-speculative"
+    static_configs:
+      - targets: ["localhost:8001"]
