@@ -16,7 +16,7 @@ fi
 # Activate the .venv and install GPU/server dependencies
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements-gpu.txt
+pip install -r requirements.txt
 
 # Hugging Face auth
 if [ -z "${HF_TOKEN:-}" ]; then
@@ -44,7 +44,3 @@ echo ""
 echo "vLLM servers started."
 echo "Baseline vLLM:    http://${INSTANCE_IP}:8000"
 echo "Speculative vLLM: http://${INSTANCE_IP}:8001"
-echo ""
-echo "Check logs:"
-echo "tail -f logs/baseline.log"
-echo "tail -f logs/speculative.log"
