@@ -8,13 +8,18 @@ output "ssh_command" {
   value = "ssh root@${tolist(linode_instance.gpu.ipv4)[0]}"
 }
 
-output "grafana_url" {
-  description = "Grafana dashboard URL."
-  value = "http://${tolist(linode_instance.gpu.ipv4)[0]}:3000"
-}
-
 output "streamlit_url" {
   description = "Streamlit visualization dashboard URL."
 
   value = "http://${tolist(linode_instance.gpu.ipv4)[0]}:8501"
+}
+
+output "prometheus_url" {
+  description = "Prometheus web interface."
+  value = "http://${tolist(linode_instance.gpu.ipv4)[0]}:9090"
+}
+
+output "grafana_url" {
+  description = "Grafana dashboard URL."
+  value = "http://${tolist(linode_instance.gpu.ipv4)[0]}:3000"
 }
