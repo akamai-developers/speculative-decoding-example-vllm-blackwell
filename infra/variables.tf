@@ -36,8 +36,7 @@ variable "ssh_public_key_path" {
 
 variable "allowed_ip_cidr" {
   type        = string
-  description = "CIDR block allowed to access SSH/Grafana/Streamlit."
-  default = "0.0.0.0/0"
+  description = "Allowed public IP CIDR for firewall access"
 }
 
 variable "repo_url" {
