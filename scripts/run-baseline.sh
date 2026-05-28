@@ -9,4 +9,3 @@ vllm serve "$TARGET_MODEL" \
   --dtype "$DTYPE" \
   --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
   --max-model-len "$MAX_MODEL_LEN" \
-  --enable-metrics
