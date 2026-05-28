@@ -217,6 +217,17 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# My own files
+# Terraform generated files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+**/.terraform.lock.hcl
+
+# Real secrets
 terraform.tfvars
+
+# Keep the example template
+!terraform.tfvars.example
+
+# other files to ignore
 _readme.md
