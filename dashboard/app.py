@@ -1,98 +1,185 @@
-import time
-import requests
-import streamlit as st
 import os
+import streamlit as st
+from client import run_streaming_vllm
+from metrics import get_spec_counters, compute_spec_delta, calculate_run_comparison
 
-VM_IP = os.getenv("VM_IP", "localhost")
-TARGET_MODEL = os.getenv("TARGET_MODEL")
-
-BASELINE_URL = f"http://{VM_IP}:8000/v1/chat/completions"
-SPECULATIVE_URL = f"http://{VM_IP}:8001/v1/chat/completions"
 
 st.set_page_config(
-    page_title="vLLM Speculative Decoding Demo",
+    page_title="Speculative Decoding Demo",
     layout="wide",
 )
 
-st.title("vLLM Baseline vs Speculative Decoding")
+st.title("Speculative Decoding with vLLM")
 
 prompt = st.text_area(
     "Prompt",
-    placeholder="Write your prompt here...",
-    height=140,
+    "Write a Python function that calculates Fibonacci numbers. Explain it briefly.",
 )
 
-max_tokens = st.slider("Max tokens", 50, 1000, 300, step=50)
-temperature = st.slider("Temperature", 0.0, 1.0, 0.0, step=0.1)
+max_tokens = st.slider("Max tokens", 64, 1024, 256, step=64)
 
-if "baseline_result" not in st.session_state:
-    st.session_state.baseline_result = None
+if st.button("Run Comparison: baseline vs speculative"):
 
-if "speculative_result" not in st.session_state:
-    st.session_state.speculative_result = None
+    spec_before = get_spec_counters()
 
+    with st.spinner("Running baseline inference..."):
+        baseline = run_streaming_vllm(
+            url=os.environ["BASELINE_URL"],
+            model=os.environ["TARGET_MODEL"],
+            prompt=prompt,
+            max_tokens=max_tokens,
+        )
 
-def run_inference(url: str, prompt: str) -> dict:
-    payload = {
-        "model": TARGET_MODEL,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
+    with st.spinner("Running speculative inference..."):
+        speculative = run_streaming_vllm(
+            url=os.environ["SPEC_URL"],
+            model=os.environ["TARGET_MODEL"],
+            prompt=prompt,
+            max_tokens=max_tokens,
+        )
 
-    start = time.perf_counter()
-    response = requests.post(url, json=payload, timeout=300)
-    end = time.perf_counter()
+    spec_after = get_spec_counters()
+    spec_stats = compute_spec_delta(spec_before, spec_after)
+    comparison = calculate_run_comparison(baseline, speculative)
 
-    response.raise_for_status()
-    data = response.json() #Convert HTTP JSON response into dict.
+    st.divider()
 
-    text = data["choices"][0]["message"]["content"] #Extract the generated text from the response.
-    usage = data.get("usage", {}) #Get the usage information from the response, which includes token counts.
-
-    # Calculate performance metrics based on the response and timing information.
-    completion_tokens = usage.get("completion_tokens", 0)
-    total_latency = end - start
-    tokens_per_second = (
-        completion_tokens / total_latency if total_latency > 0 else 0
+    st.subheader(
+        "Headline Results"
     )
 
-    return {
-        "text": text,
-        "latency": total_latency,
-        "completion_tokens": completion_tokens,
-        "tokens_per_second": tokens_per_second,
-    }
+    col1, col2, col3 = st.columns(3)
 
+    col1.metric(
+        "Throughput Speedup",
+        (
+            f"{comparison['throughput_speedup']:.2f}x"
+            if comparison["throughput_speedup"]
+            else "N/A"
+        ),
+    )
 
-col1, col2 = st.columns(2)
+    col2.metric(
+        "Latency Reduction",
+        (
+            f"{comparison['latency_reduction']*100:.1f}%"
+            if comparison["latency_reduction"]
+            is not None
+            else "N/A"
+        ),
+    )
 
-with col1:
-    st.subheader("Baseline")
+    col3.metric(
+        "Acceptance Rate",
+        (
+            f"{spec_stats['acceptance_rate']*100:.1f}%"
+            if spec_stats["acceptance_rate"]
+            is not None
+            else "N/A"
+        ),
+    )
 
-    if st.button("Run Baseline"):
-        with st.spinner("Running baseline inference..."):
-            st.session_state.baseline_result = run_inference(BASELINE_URL, prompt)
+    st.divider()
 
-    result = st.session_state.baseline_result
-    if result:
-        st.metric("Total latency", f"{result['latency']:.2f}s")
-        st.metric("Generated tokens", result["completion_tokens"])
-        st.metric("Tokens/sec", f"{result['tokens_per_second']:.2f}")
-        st.code(result["text"], language="text")
+    left, right = st.columns(2)
 
-with col2:
-    st.subheader("Speculative")
+    with left:
 
-    if st.button("Run Speculative"):
-        with st.spinner("Running speculative inference..."):
-            st.session_state.speculative_result = run_inference(SPECULATIVE_URL, prompt)
+        st.subheader("Baseline")
 
-    result = st.session_state.speculative_result
-    if result:
-        st.metric("Total latency", f"{result['latency']:.2f}s")
-        st.metric("Generated tokens", result["completion_tokens"])
-        st.metric("Tokens/sec", f"{result['tokens_per_second']:.2f}")
-        st.code(result["text"], language="text")
+        st.metric(
+            "Latency",
+            f"{baseline['latency']:.2f}s",
+        )
+
+        st.metric(
+            "TTFT",
+            (
+                f"{baseline['ttft']:.2f}s"
+                if baseline["ttft"]
+                else "N/A"
+            ),
+        )
+
+        st.metric(
+            "Output Tokens", baseline["output_tokens"],)
+
+        st.metric("Output Throughput", f"{baseline['output_tps']:.2f} tok/s")
+
+        st.code(baseline["text"])
+
+    with right:
+
+        st.subheader(
+            "Speculative"
+        )
+
+        st.metric(
+            "Latency",
+            f"{speculative['latency']:.2f}s",
+        )
+
+        st.metric(
+            "TTFT",
+            (
+                f"{speculative['ttft']:.2f}s"
+                if speculative["ttft"]
+                else "N/A"
+            ),
+        )
+
+        st.metric(
+            "Output Tokens",
+            speculative["output_tokens"],
+        )
+
+        st.metric(
+            "Output Throughput",
+            f"{speculative['output_tps']:.2f} tok/s",
+        )
+
+        st.metric(
+            "Mean Accepted Length",
+            (
+                f"{spec_stats['mean_accepted_length']:.2f}"
+                if spec_stats[
+                    "mean_accepted_length"
+                ]
+                else "N/A"
+            ),
+        )
+
+        st.code(
+            speculative["text"]
+        )
+
+    st.divider()
+
+    st.subheader(
+        "Speculative Decoding Internals"
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric(
+        "Draft Tokens Proposed",
+        int(
+            spec_stats["draft_delta"]
+        ),
+    )
+
+    col2.metric(
+        "Draft Tokens Accepted",
+        int(
+            spec_stats["accepted_delta"]
+        ),
+    )
+
+    col3.metric(
+        "Draft Cycles",
+        int(
+            spec_stats[
+                "draft_cycles_delta"
+            ]
+        ),
+    )
