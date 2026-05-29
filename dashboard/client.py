@@ -48,7 +48,11 @@ def run_inference(url: str, model: str, prompt: str, max_tokens: int = 256) -> d
         if chunk.get("usage") is not None:
             usage = chunk["usage"]
 
-        delta = chunk["choices"][0].get("delta", {})
+        choices = chunk.get("choices", [])
+        if not choices:
+            continue
+
+        delta = choices[0].get("delta", {})
         token = delta.get("content", "")
 
         if token:
