@@ -31,7 +31,7 @@ if st.button("Run Comparison: baseline vs speculative"):
         )
 
     with st.spinner("Running speculative inference..."):
-        speculative = run_infer(
+        speculative = run_inference(
             url=os.environ["SPEC_URL"],
             model=os.environ["TARGET_MODEL"],
             prompt=prompt,
