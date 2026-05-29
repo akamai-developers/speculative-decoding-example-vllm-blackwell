@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source config/speculative.env
+source .venv/bin/activate
+
+set -a
+source .env
+set +a
 
 SPECULATIVE_CONFIG=$(cat <<EOF
 {
@@ -13,8 +17,8 @@ EOF
 )
 
 vllm serve "$TARGET_MODEL" \
-  --host "$VLLM_HOST" \
-  --port "$VLLM_PORT" \
+  --host 0.0.0.0 \
+  --port 8001 \
   --speculative-config "$SPECULATIVE_CONFIG" \
   --dtype "$DTYPE" \
   --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
