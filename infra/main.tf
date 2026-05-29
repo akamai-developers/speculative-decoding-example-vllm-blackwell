@@ -59,6 +59,14 @@ resource "linode_firewall" "fw" {
     ports    = "8001"
     ipv4     = [var.allowed_ip_cidr]
   }
+
+  inbound {
+    label    = "allow-streamlit"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "8501"
+    ipv4     = [var.allowed_ip_cidr]
+  }
 }
 
 resource "linode_instance" "gpu" {
