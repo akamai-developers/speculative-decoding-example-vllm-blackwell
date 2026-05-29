@@ -19,12 +19,18 @@ def get_metric_counter(metrics_text: str, metric_name: str) -> float:
 
 
 def get_spec_counters():
-    response = requests.get(
-        os.environ["SPEC_METRICS_URL"],
-        timeout=10,
-    )
-
-    response.raise_for_status()
+    try:
+        response = requests.get(
+            os.environ["SPEC_METRICS_URL"],
+            timeout=10,
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        return {
+            "accepted_tokens": 0.0,
+            "draft_tokens": 0.0,
+            "draft_cycles": 0.0,
+        }
 
     metrics = response.text
 
@@ -45,39 +51,28 @@ def get_spec_counters():
 
 
 def compute_spec_delta(before, after):
-    accepted_delta = (
-        after["accepted_tokens"]
-        - before["accepted_tokens"]
+    accepted_delta = max(
+        0,
+        after["accepted_tokens"] - before["accepted_tokens"],
     )
 
-    draft_delta = (
-        after["draft_tokens"]
-        - before["draft_tokens"]
+    draft_delta = max(
+        0,
+        after["draft_tokens"] - before["draft_tokens"],
     )
 
-    draft_cycles_delta = (
-        after["draft_cycles"]
-        - before["draft_cycles"]
+    draft_cycles_delta = max(
+        0,
+        after["draft_cycles"] - before["draft_cycles"],
     )
 
     acceptance_rate = None
-
     if draft_delta > 0:
-        acceptance_rate = (
-            accepted_delta
-            / draft_delta
-        )
+        acceptance_rate = accepted_delta / draft_delta
 
     mean_accepted_length = None
-
     if draft_cycles_delta > 0:
-        mean_accepted_length = (
-            1
-            + (
-                accepted_delta
-                / draft_cycles_delta
-            )
-        )
+        mean_accepted_length = 1 + (accepted_delta / draft_cycles_delta)
 
     return {
         "accepted_delta": accepted_delta,
@@ -88,28 +83,16 @@ def compute_spec_delta(before, after):
     }
 
 
-def calculate_run_comparison(
-    baseline,
-    speculative,
-):
+def calculate_run_comparison(baseline, speculative):
     throughput_speedup = None
-
     if baseline["output_tps"] > 0:
-        throughput_speedup = (
-            speculative["output_tps"]
-            / baseline["output_tps"]
-        )
+        throughput_speedup = speculative["output_tps"] / baseline["output_tps"]
 
     latency_reduction = None
-
     if baseline["latency"] > 0:
         latency_reduction = (
-            (
-                baseline["latency"]
-                - speculative["latency"]
-            )
-            / baseline["latency"]
-        )
+            baseline["latency"] - speculative["latency"]
+        ) / baseline["latency"]
 
     return {
         "throughput_speedup": throughput_speedup,

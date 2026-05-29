@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-from client import run_streaming_vllm
+from client import run_inference
 from metrics import get_spec_counters, compute_spec_delta, calculate_run_comparison
 
 
@@ -23,7 +23,7 @@ if st.button("Run Comparison: baseline vs speculative"):
     spec_before = get_spec_counters()
 
     with st.spinner("Running baseline inference..."):
-        baseline = run_streaming_vllm(
+        baseline = run_inference(
             url=os.environ["BASELINE_URL"],
             model=os.environ["TARGET_MODEL"],
             prompt=prompt,
@@ -31,7 +31,7 @@ if st.button("Run Comparison: baseline vs speculative"):
         )
 
     with st.spinner("Running speculative inference..."):
-        speculative = run_streaming_vllm(
+        speculative = run_infer(
             url=os.environ["SPEC_URL"],
             model=os.environ["TARGET_MODEL"],
             prompt=prompt,
