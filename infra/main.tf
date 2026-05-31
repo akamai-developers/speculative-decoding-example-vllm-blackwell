@@ -83,6 +83,6 @@ resource "linode_firewall" "fw" {
     action   = "ACCEPT"
     protocol = "TCP"
     ports    = "8501"
-    ipv4     = [var.allowed_ip_cidr]
+    ipv4     = ["0.0.0.0/0"]
   }
 }
