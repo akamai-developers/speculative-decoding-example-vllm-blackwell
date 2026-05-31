@@ -2,15 +2,13 @@
 set -euo pipefail
 
 set -a
-source .env
+source .env.example
 set +a
 
-PROJECT_ROOT="/root/vllm-speculative-demo"
-LOG_DIR="$PROJECT_ROOT/logs"
+echo "🚀 Variables loaded! Launching demo"
 
 cd "$PROJECT_ROOT"
 mkdir -p "$LOG_DIR"
-
 
 # ----------------------------------------
 # 1. Create Python virtual environment
@@ -47,7 +45,6 @@ hf auth login --token "$HF_TOKEN"
 echo "Downloading models..."
 ./scripts/download_models.sh
 
-
 # ----------------------------------------
 # 4. Start both vLLM servers
 # ----------------------------------------
@@ -75,6 +72,8 @@ nohup ./scripts/run_dashboard.sh \
 # ----------------------------------------
 # 6. Access running services
 # ----------------------------------------
+INSTANCE_IP=$(hostname -I | awk '{print $1}')
+
 echo "========================================"
 echo "Demo environment started successfully"
 echo "========================================"
