@@ -15,60 +15,6 @@ resource "linode_sshkey" "default" {
   ssh_key = chomp(file(var.ssh_public_key_path))
 }
 
-resource "linode_firewall" "fw" {
-  label   = "${var.project_name}-fw"
-  inbound_policy  = "DROP"
-  outbound_policy = "ACCEPT"
-
-  inbound {
-    label    = "ssh"
-    action   = "ACCEPT"
-    protocol = "TCP"
-    ports    = "22"
-    ipv4     = [var.allowed_ip_cidr]
-  }
-
-  inbound {
-    label    = "grafana"
-    action   = "ACCEPT"
-    protocol = "TCP"
-    ports    = "3000"
-    ipv4     = [var.allowed_ip_cidr]
-  }
-  
-  inbound {
-    label    = "prometheus"
-    action   = "ACCEPT"
-    protocol = "TCP"
-    ports    = "9090"
-    ipv4     = [var.allowed_ip_cidr]
-  }
-
-  inbound {
-    label    = "allow-vllm-baseline"
-    action   = "ACCEPT"
-    protocol = "TCP"
-    ports    = "8000"
-    ipv4     = [var.allowed_ip_cidr]
-  }
-
-  inbound {
-    label    = "allow-vllm-speculative"
-    action   = "ACCEPT"
-    protocol = "TCP"
-    ports    = "8001"
-    ipv4     = [var.allowed_ip_cidr]
-  }
-
-  inbound {
-    label    = "allow-streamlit"
-    action   = "ACCEPT"
-    protocol = "TCP"
-    ports    = "8501"
-    ipv4     = [var.allowed_ip_cidr]
-  }
-}
-
 resource "linode_instance" "gpu" {
   label           = "${var.project_name}-gpu"
   region          = var.region
@@ -85,4 +31,58 @@ resource "linode_instance" "gpu" {
   }
 
   tags = ["vllm", "speculative-decoding", "gpu"]
+}
+
+resource "linode_firewall" "fw" {
+  label   = "${var.project_name}-fw"
+  inbound_policy  = "DROP"
+  outbound_policy = "ACCEPT"
+
+  inbound {
+    label    = "ssh"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "22"
+    ipv4     = ["0.0.0.0/0"]
+  }
+
+  inbound {
+    label    = "grafana"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "3000"
+    ipv4     = ["0.0.0.0/0"]
+  }
+  
+  inbound {
+    label    = "prometheus"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "9090"
+    ipv4     = ["0.0.0.0/0"]
+  }
+
+  inbound {
+    label    = "allow-vllm-baseline"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "8000"
+    ipv4     = ["0.0.0.0/0"]
+  }
+
+  inbound {
+    label    = "allow-vllm-speculative"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "8001"
+    ipv4     = ["0.0.0.0/0"]
+  }
+
+  inbound {
+    label    = "allow-streamlit"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "8501"
+    ipv4     = [var.allowed_ip_cidr]
+  }
 }
