@@ -34,11 +34,6 @@ variable "ssh_public_key_path" {
   default = "~/.ssh/id_ed25519.pub"
 }
 
-variable "allowed_ip_cidr" {
-  type        = string
-  description = "Allowed public IP CIDR for firewall access"
-}
-
 variable "repo_url" {
   type        = string
   description = "Git repository cloned onto the GPU instance."
