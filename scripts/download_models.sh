@@ -3,10 +3,6 @@ set -euo pipefail
 
 source .venv/bin/activate
 
-set -a
-source .env
-set +a
-
 mkdir -p "$MODELS_DIR"
 
 hf download "$TARGET_MODEL_HF" \
