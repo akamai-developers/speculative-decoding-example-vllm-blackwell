@@ -3,7 +3,7 @@ set -euo pipefail
 
 source .venv/bin/activate
 
-DTYPE="bfloat16"
+DTYPE="bfloat8"
 MAX_MODEL_LEN=2048
 GPU_MEMORY_UTILIZATION=0.55 # Target + Draft need breathing room
 NUM_SPECULATIVE_TOKENS=5
