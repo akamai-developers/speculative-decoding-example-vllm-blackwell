@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source .venv/bin/activate
-
-DTYPE="bfloat8"
-MAX_MODEL_LEN=2048
-GPU_MEMORY_UTILIZATION=0.35 # Fixed static slice of your 96GB VRAM
+GPU_MEMORY_UTILIZATION=0.35 
 
 vllm serve "$TARGET_MODEL" \
   --host 0.0.0.0 \

@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source .venv/bin/activate
-
-DTYPE="bfloat8"
-MAX_MODEL_LEN=2048
-GPU_MEMORY_UTILIZATION=0.55 # Target + Draft need breathing room
+GPU_MEMORY_UTILIZATION=0.55 
 NUM_SPECULATIVE_TOKENS=5
 
 vllm serve "$TARGET_MODEL" \

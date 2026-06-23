@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source .venv/bin/activate
-
+# Create models directory if it doesn't exist
 mkdir -p "$MODELS_DIR"
 
-hf download "$TARGET_MODEL_HF" \
+echo "Downloading target model: $TARGET_MODEL_HF..."
+huggingface-cli download "$TARGET_MODEL_HF" \
   --local-dir "$TARGET_MODEL"
 
-hf download "$DRAFT_MODEL_HF" \
+echo "Downloading draft model: $DRAFT_MODEL_HF..."
+huggingface-cli download "$DRAFT_MODEL_HF" \
   --local-dir "$DRAFT_MODEL"
