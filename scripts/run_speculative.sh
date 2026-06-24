@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GPU_MEMORY_UTILIZATION=0.55 
+GPU_MEMORY_UTILIZATION=0.45
 NUM_SPECULATIVE_TOKENS=5
 
 vllm serve "$TARGET_MODEL" \
