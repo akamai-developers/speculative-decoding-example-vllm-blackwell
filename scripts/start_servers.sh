@@ -6,12 +6,6 @@ set -a
 source config.env
 set +a
 
-# Dynamically resolve local model paths based on HF names
-export TARGET_MODEL="$MODELS_DIR/$(basename "$TARGET_MODEL_HF")"
-export DRAFT_MODEL="$MODELS_DIR/$(basename "$DRAFT_MODEL_HF")"
-
-echo "🚀 Variables loaded! Launching demo"
-
 cd "$PROJECT_ROOT"
 mkdir -p "$LOG_DIR"
 
