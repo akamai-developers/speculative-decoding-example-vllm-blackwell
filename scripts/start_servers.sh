@@ -40,7 +40,7 @@ if [ -z "${HF_TOKEN:-}" ]; then
 fi
 
 echo "Authenticating with Hugging Face..."
-hf auth login --token "$HF_TOKEN" --yes
+hf auth login --token "$HF_TOKEN"
 
 # ----------------------------------------
 # 3. Model download
