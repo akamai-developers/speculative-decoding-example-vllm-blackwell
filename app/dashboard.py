@@ -9,6 +9,7 @@ st.set_page_config(page_title="vLLM Speculative Decoding Showdown", layout="wide
 st.title("🚀 vLLM Speculative Decoding Showdown")
 st.subheader("NVIDIA Blackwell Live Profiling Demo")
 
+TARGET_MODEL = os.environ["TARGET_MODEL"]
 BASELINE_URL = "http://127.0.0.1:8000/v1/chat/completions"
 SPECULATIVE_URL = "http://127.0.0.1:8001/v1/chat/completions"
 
