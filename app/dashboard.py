@@ -9,17 +9,15 @@ st.set_page_config(page_title="vLLM Speculative Decoding Showdown", layout="wide
 st.title("🚀 vLLM Speculative Decoding Showdown")
 st.subheader("NVIDIA Blackwell Live Profiling Demo")
 
-# Setup model configuration matches exactly what vLLM registers local folders as
-MODEL_ID = "/root/vllm-speculative-demo/models/Llama-3.1-8B-Instruct"
-BASELINE_URL = "http://host.docker.internal:8000/v1/chat/completions"
-SPECULATIVE_URL = "http://host.docker.internal:8001/v1/chat/completions"
+BASELINE_URL = "http://127.0.0.1:8000/v1/chat/completions"
+SPECULATIVE_URL = "http://127.0.0.1:8001/v1/chat/completions"
 
 # -------------------------------------------------------------------
 # Async streaming worker for vLLM endpoints
 # -------------------------------------------------------------------
 async def stream_from_vllm(url, prompt, placeholder, metric_placeholder):
     payload = {
-        "model": MODEL_ID,
+        "model": TARGET_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
         "stream": True
