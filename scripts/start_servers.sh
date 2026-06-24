@@ -43,17 +43,20 @@ echo "Downloading models..."
 ./scripts/download_models.sh
 
 # ----------------------------------------
-# 4. Start vLLM servers
+# 4. Start both vLLM servers (Staggered to prevent profiling race conditions)
 # ----------------------------------------
 echo "Starting baseline vLLM server..."
 nohup ./scripts/run_baseline.sh > "$LOG_DIR/baseline.log" 2>&1 &
 
+# Give the baseline server 30 seconds to load weights and allocate its KV cache
+echo "⏳ Allowing baseline server to initialize and lock VRAM..."
+sleep 30
+
 echo "Starting speculative vLLM server..."
 nohup ./scripts/run_speculative.sh > "$LOG_DIR/speculative.log" 2>&1 &
 
-# Give vLLM time to initialize
-echo "Waiting for vLLM servers to initialize..."
-sleep 15
+echo "⏳ Waiting for speculative vLLM server to initialize..."
+sleep 30
 
 # ----------------------------------------
 # 5. Start Streamlit dashboard
