@@ -68,7 +68,7 @@ nohup ./scripts/run_dashboard.sh > "$LOG_DIR/dashboard.log" 2>&1 &
 # 6. Start Prometheus + Grafana 
 # ----------------------------------------
 echo "Starting Prometheus and Grafana containers..."
-docker-compose -f app/docker-compose.yaml up -d
+docker-compose -f app/docker-compose.yml up -d
 
 # ----------------------------------------
 # 6. Access running services
