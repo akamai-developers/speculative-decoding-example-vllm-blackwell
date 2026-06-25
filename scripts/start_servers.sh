@@ -65,6 +65,12 @@ echo "Starting Streamlit dashboard..."
 nohup ./scripts/run_dashboard.sh > "$LOG_DIR/dashboard.log" 2>&1 &
 
 # ----------------------------------------
+# 6. Start Prometheus + Grafana 
+# ----------------------------------------
+echo "Starting Prometheus and Grafana containers..."
+docker-compose -f app/docker-compose.yaml up -d
+
+# ----------------------------------------
 # 6. Access running services
 # ----------------------------------------
 INSTANCE_IP=$(hostname -I | awk '{print $1}')
@@ -75,3 +81,5 @@ echo "========================================"
 echo "Baseline vLLM:    http://${INSTANCE_IP}:8000"
 echo "Speculative vLLM: http://${INSTANCE_IP}:8001"
 echo "Dashboard:        http://${INSTANCE_IP}:8501"
+echo "Grafana:          http://${INSTANCE_IP}:3000"
+echo "Prometheus:       http://${INSTANCE_IP}:9090"
