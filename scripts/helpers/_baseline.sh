@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GPU_MEMORY_UTILIZATION=0.35
+GPU_MEMORY_UTILIZATION=0.38
 
 vllm serve "$TARGET_MODEL" \
   --host 0.0.0.0 \
