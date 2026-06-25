@@ -228,6 +228,3 @@ terraform.tfvars
 
 # Keep the example template
 !terraform.tfvars.example
-
-# other files to ignore
-_app.py
