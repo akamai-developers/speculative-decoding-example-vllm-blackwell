@@ -8,7 +8,7 @@ echo "Starting Streamlit dashboard..."
 nohup ./scripts/helpers/_streamlit.sh > "$LOG_DIR/dashboard.log" 2>&1 &
 
 echo "Starting Prometheus, Grafana, and DCGM Exporter..."
-docker compose -f app/docker-compose.yml up -d
+docker-compose -f app/docker-compose.yml up -d
 
 echo "========================================"
 echo "Monitoring started"
