@@ -15,6 +15,8 @@ services:
       - '--storage.tsdb.path=/prometheus'
     ports:
       - "9090:9090"
+    depends_on:
+      - dcgm-exporter
 
   grafana:
     image: grafana/grafana:latest
@@ -23,6 +25,22 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless
+    container_name: dcgm-exporter
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    ports:
+      - "9400:9400"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 volumes:
   prometheus_data:
