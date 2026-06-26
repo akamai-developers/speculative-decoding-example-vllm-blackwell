@@ -1,4 +1,4 @@
-# app.py
+import os 
 import time
 import requests
 import streamlit as st
@@ -7,7 +7,7 @@ from openai import OpenAI
 BASELINE_URL = "http://127.0.0.1:8000/v1"
 SPEC_URL = "http://127.0.0.1:8001/v1"
 
-TARGET_MODEL = "Qwen/Qwen2.5-32B-Instruct-AWQ"
+TARGET_MODEL = os.getenv('TARGET_MODEL')
 
 baseline_client = OpenAI(base_url=BASELINE_URL, api_key="EMPTY")
 spec_client = OpenAI(base_url=SPEC_URL, api_key="EMPTY")
