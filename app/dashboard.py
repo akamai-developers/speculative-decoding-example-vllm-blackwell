@@ -76,7 +76,9 @@ def stream_request(name, client, model, prompt, out_queue):
                     "latency": total_latency,
                     "ttft": first_token_time,
                     "chunks": chunk_count,
-                    "chunks_per_second": chunk_count / total_latency if total_latency > 0 else 0,
+                    "chunks_per_second": chunk_count / total_latency
+                    if total_latency > 0
+                    else 0,
                 },
             )
         )
@@ -119,42 +121,48 @@ run = st.button("Run baseline + speculative concurrently", type="primary")
 
 st.divider()
 
-# Metrics are always visible near the top.
-st.subheader("Live comparison metrics")
+metrics_left, metrics_right = st.columns(2)
 
-top1, top2, top3, top4 = st.columns(4)
-baseline_latency_slot = top1.empty()
-spec_latency_slot = top2.empty()
-speedup_slot = top3.empty()
-acceptance_slot = top4.empty()
+with metrics_left:
+    st.subheader("Baseline")
 
-bottom1, bottom2, bottom3, bottom4 = st.columns(4)
-baseline_ttft_slot = bottom1.empty()
-spec_ttft_slot = bottom2.empty()
-baseline_tps_slot = bottom3.empty()
-spec_tps_slot = bottom4.empty()
+    b1, b2, b3 = st.columns(3)
+    baseline_latency_slot = b1.empty()
+    baseline_ttft_slot = b2.empty()
+    baseline_tps_slot = b3.empty()
 
-baseline_latency_slot.metric("Baseline latency", "—")
-spec_latency_slot.metric("Spec latency", "—")
-speedup_slot.metric("Speedup", "—")
-acceptance_slot.metric("Draft acceptance rate", "—")
+    baseline_latency_slot.metric("Total latency", "—")
+    baseline_ttft_slot.metric("Time to first token", "—")
+    baseline_tps_slot.metric("Tokens/sec", "—")
 
-baseline_ttft_slot.metric("Baseline TTFT", "—")
-spec_ttft_slot.metric("Spec TTFT", "—")
-baseline_tps_slot.metric("Baseline chunks/sec", "—")
-spec_tps_slot.metric("Spec chunks/sec", "—")
+with metrics_right:
+    st.subheader("Speculative")
+
+    s1, s2, s3 = st.columns(3)
+    spec_latency_slot = s1.empty()
+    spec_ttft_slot = s2.empty()
+    spec_tps_slot = s3.empty()
+
+    s4, s5 = st.columns(2)
+    speedup_slot = s4.empty()
+    acceptance_slot = s5.empty()
+
+    spec_latency_slot.metric("Total latency", "—")
+    spec_ttft_slot.metric("Time to first token", "—")
+    spec_tps_slot.metric("Tokens/sec", "—")
+    speedup_slot.metric("Speedup", "—")
+    acceptance_slot.metric("Draft acceptance rate", "—")
 
 st.divider()
 
-# Outputs are below the metrics, side by side.
 output_col1, output_col2 = st.columns(2)
 
 with output_col1:
-    st.subheader("Baseline: target model only")
+    st.subheader("Baseline output")
     baseline_box = st.empty()
 
 with output_col2:
-    st.subheader("Speculative: target + draft model")
+    st.subheader("Speculative output")
     spec_box = st.empty()
 
 
@@ -197,19 +205,27 @@ if run:
 
             elif event_type == "ttft":
                 if name == "baseline":
-                    baseline_ttft_slot.metric("Baseline TTFT", f"{payload:.2f}s")
+                    baseline_ttft_slot.metric("Time to first token", f"{payload:.2f}s")
                 else:
-                    spec_ttft_slot.metric("Spec TTFT", f"{payload:.2f}s")
+                    spec_ttft_slot.metric("Time to first token", f"{payload:.2f}s")
 
             elif event_type == "done":
                 if name == "baseline":
                     baseline_result = payload
-                    baseline_latency_slot.metric("Baseline latency", f"{payload['latency']:.2f}s")
-                    baseline_tps_slot.metric("Baseline chunks/sec", f"{payload['chunks_per_second']:.1f}")
+                    baseline_latency_slot.metric(
+                        "Total latency", f"{payload['latency']:.2f}s"
+                    )
+                    baseline_tps_slot.metric(
+                        "Tokens/sec", f"{payload['chunks_per_second']:.1f}"
+                    )
                 else:
                     spec_result = payload
-                    spec_latency_slot.metric("Spec latency", f"{payload['latency']:.2f}s")
-                    spec_tps_slot.metric("Spec chunks/sec", f"{payload['chunks_per_second']:.1f}")
+                    spec_latency_slot.metric(
+                        "Total latency", f"{payload['latency']:.2f}s"
+                    )
+                    spec_tps_slot.metric(
+                        "Tokens/sec", f"{payload['chunks_per_second']:.1f}"
+                    )
 
             elif event_type == "error":
                 if name == "baseline":
