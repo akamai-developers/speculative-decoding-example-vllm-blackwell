@@ -13,7 +13,7 @@ docker-compose -f app/docker-compose.yml up -d
 echo "========================================"
 echo "Monitoring started"
 echo "========================================"
-echo "Dashboard:     http://${INSTANCE_IP}:8501"
+echo "Streamlit:     http://${INSTANCE_IP}:8501"
 echo "Grafana:       http://${INSTANCE_IP}:3000"
 echo "Prometheus:    http://${INSTANCE_IP}:9090"
 echo "DCGM Exporter: http://${INSTANCE_IP}:9400/metrics"
