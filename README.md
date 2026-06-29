@@ -91,9 +91,7 @@ speculative-decoding-example-vllm-blackwell/
 
 # Inference Architecture & Model Configuration
 
-This demo spins up two separate, independent vLLM engine servers to allow the Streamlit frontend to run side-by-side inference comparisons. 
-
-The baseline and speculative deployments run concurrently on distinct ports. Both vLLM servers must be started before launching the dashboard.
+This demo spins up two independent vLLM engine servers running on port 8000 (baseline) and port 8001 (speculative) to allow the Streamlit frontend to run side-by-side inference comparisons. 
 
 | Service / Server | Port | Role / Core Purpose |
 | :--- | :--- | :--- |
@@ -101,25 +99,12 @@ The baseline and speculative deployments run concurrently on distinct ports. Bot
 | **Speculative Engine** | `8001` | Accelerated draft + target speculative decoding |
 | **Streamlit Dashboard** | `8501` | Interactive Frontend UI & experiment coordinator |
 
-## Runtime Configurations
-The behavior, model selection, and optimization settings for these engines are isolated and managed via dedicated environment files located in the repository:
-
-```text
-config/baseline.env      # Configurations for the standalone target engine
-config/speculative.env   # Configurations for the spec-decoding engine
-```
-
 
 # Metrics and Observability
 This project tracks performance from two perspectives: **Client-Side User Experience** (Streamlit) and **Server-Side Engine Efficiency** (vLLM + Grafana).
 
 ## 1. Streamlit Dashboard (Client-Side UX)
-The Streamlit frontend provides real-time, user-facing experiment metrics to compare standard inference against speculative decoding side-by-side.
-
-### **Interactive Controls**
-* **Prompt Input:** Enter custom prompts to test different complexity levels.
-* **Mode Toggle:** Switch between baseline inference and speculative decoding mode.
-* **Side-by-Side View:** Watch token generation happen in real-time across both configurations.
+The Streamlit frontend provides real-time, user-facing experiment metrics to compare standard inference against speculative decoding side-by-side..
 
 ### **Captured UX Metrics**
 * **Total Latency (s):** Wall-clock time from request initiation to the final token.
@@ -265,7 +250,7 @@ Open the dashboard in your browser:
 http://<instance-ip>:8501
 ```
 
-## 8. Updating Runtime Settings
+## 8. Updating Runtime Configuration Settings
 
 To change runtime settings such as:
 
@@ -282,7 +267,7 @@ config.env
 Example:
 
 ```bash
-GPU_MEMORY_UTILIZATION="0.60"
+GPU_MEMORY_UTILIZATION="0.46"
 ```
 
 Then restart the corresponding vLLM server.
