@@ -1,0 +1,120 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "title": "ROW 1: USER EXPERIENCE & LATENCY (TPOT)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "title": "Baseline TPOT (Port 8000)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(vllm:time_per_output_token_seconds_sum{instance=~\".*8000\"}[1m]) / rate(vllm:time_per_output_token_seconds_count{instance=~\".*8000\"}[1m])",
+          "legendFormat": "Baseline TPOT"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line" }, "unit": "s" } }
+    },
+    {
+      "title": "Speculative TPOT (Port 8001)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 1 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(vllm:time_per_output_token_seconds_sum{instance=~\".*8001\"}[1m]) / rate(vllm:time_per_output_token_seconds_count{instance=~\".*8001\"}[1m])",
+          "legendFormat": "Speculative TPOT"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line" }, "unit": "s" } }
+    },
+    {
+      "type": "row",
+      "title": "ROW 2: ENGINE EFFICIENCY & DRAFT ACCEPTANCE MATH",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 8 }
+    },
+    {
+      "title": "Draft Tokens Accepted (Cumulative Count)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 9 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(vllm:spec_decode_num_accepted_tokens[1m])",
+          "legendFormat": "Accepted Tokens/sec"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line" } } }
+    },
+    {
+      "title": "Draft Request Token Generation Volume",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 9 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(vllm:spec_decode_num_draft_tokens[1m])",
+          "legendFormat": "Draft Generated/sec"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line" } } }
+    },
+    {
+      "type": "row",
+      "title": "ROW 3: INFRASTRUCTURE CAPACITY & VRAM PRESSURES",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 }
+    },
+    {
+      "title": "GPU KV Cache Memory Footprint (Baseline vs Spec)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 17 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "vllm:kv_cache_usage_perc{instance=~\".*8000\"}",
+          "legendFormat": "Baseline VRAM Allocation"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "vllm:kv_cache_usage_perc{instance=~\".*8001\"}",
+          "legendFormat": "Speculative VRAM Allocation"
+        }
+      ],
+      "fieldConfig": { "defaults": { "min": 0, "max": 1, "unit": "percentunit" } }
+    },
+    {
+      "title": "Engine Core Swapped Requests",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 17 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "vllm:num_requests_swapped",
+          "legendFormat": "Port {{instance}} Swapped Requests"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars" } } }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["vllm", "speculative-decoding"],
+  "time": { "from": "now-5m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "vLLM 0.23.0 Speculative Decoding Dashboard"
+}
