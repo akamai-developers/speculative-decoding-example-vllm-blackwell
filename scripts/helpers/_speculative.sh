@@ -1,13 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-  vllm serve "$TARGET_MODEL" \
+# demo 1-2
+vllm serve "$TARGET_MODEL"  \
+  --served-model-name qwen3-32b-fp4-spec \
   --host 0.0.0.0 \
   --port 8001 \
-  --quantization fp8 \
-  --dtype bfloat16 \
-  --max-num-seqs 4 \
-  --gpu-memory-utilization 0.85 \
-  --max-model-len 2048 \
-  --speculative-model "$DRAFT_MODEL" \
-  --num-speculative-tokens 5
+  --gpu-memory-utilization 0.46 \
+  --max-model-len 32768 \
+  --max-num-seqs 1 \
+  --kv-cache-dtype auto \
+  --speculative-config "{\"method\":\"draft_model\",\"model\":\"$DRAFT_MODEL\",\"num_speculative_tokens\":4}"
+
+
+# demo 3
+# vllm serve "$TARGET_MODEL" \
+#   --served-model-name qwen3-32b-fp4-spec \
+#   --host 0.0.0.0 \
+#   --port 8001 \
+#   --gpu-memory-utilization 0.46 \
+#   --max-model-len 1024 \
+#   --max-num-seqs 32 \
+#   --kv-cache-dtype auto \
+#   --speculative-config "{\"method\":\"draft_model\",\"model\":\"$DRAFT_MODEL\",\"num_speculative_tokens\":4}"
