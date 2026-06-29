@@ -4,10 +4,9 @@ set -euo pipefail
 
 # demo 1-2
 vllm serve "$TARGET_MODEL" \
-  --served-model-name qwen3-32b-fp4-baseline \
+  --served-model-name qwen3-32b-fp8-baseline \
   --host 0.0.0.0 \
   --port 8000 \
-  --quantization modelopt_fp4 \
   --gpu-memory-utilization 0.44 \
   --max-model-len 32768 \
   --max-num-seqs 1 \
@@ -15,7 +14,7 @@ vllm serve "$TARGET_MODEL" \
 
 # demo 3
 # vllm serve "$TARGET_MODEL" \
-#   --served-model-name qwen3-32b-fp4-baseline \
+#   --served-model-name qwen3-32b-fp8-baseline \
 #   --host 0.0.0.0 \
 #   --port 8000 \
 #   --gpu-memory-utilization 0.44 \
