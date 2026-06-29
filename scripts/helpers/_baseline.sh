@@ -4,6 +4,7 @@ set -euo pipefail
 vllm serve "$TARGET_MODEL" \
   --host 0.0.0.0 \
   --port 8000 \
+  --quantization fp8 \
   --dtype bfloat16 \
   --max-num-seqs 4 \
   --gpu-memory-utilization 0.85 \
