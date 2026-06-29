@@ -230,7 +230,7 @@ You should automatically land in:
 Run (in this order):
 
 ```bash
-HF_TOKEN="hf_xxx"
+export HF_TOKEN="hf_xxx"
 ./scripts/setup_env.sh
 ./scripts/start-monitor.sh
 ./scripts/start-vllm.sh
