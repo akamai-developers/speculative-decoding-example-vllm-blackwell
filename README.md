@@ -33,15 +33,24 @@ Configures shell environment
   ↓
 User SSHs into VM
   ↓
-Runs start-demo.sh
+Run setup_env.sh
   ↓
+Configures environment variables
 Creates Python virtual environment
 Installs Python dependencies
-Downloads models
+Downloads models from Hugging Face
+  ↓
+Run start_monitor.sh
+  ↓
 Starts:
-  - Baseline vLLM server
-  - Speculative vLLM server
   - Streamlit dashboard
+  - Grafana/ Prometheus docker containers
+  ↓
+Run vllm_server.sh
+  ↓
+Starts:
+  - Baseline vLLM server (port 8000)
+  - Speculative vLLM server (port 8001)
 ```
 
 
@@ -49,27 +58,32 @@ Starts:
 
 ```text
 speculative-decoding-example-vllm-blackwell/
+├── app/
+│   ├── docker-compose.yml
+│   ├── grafana.json
+│   ├── prometheus.yml
+│   └── streamlit.py
+│
 ├── infra/
 │   ├── main.tf
-│   ├── variables.tf
-│   ├── outputs.tf
+│   ├── _variables.tf
+│   ├── _outputs.tf
 │   ├── terraform.tfvars.example
 │   └── cloud-init.yaml
 │
-├── config/
-│   ├── baseline.env
-│   └── speculative.env
-│
-├── dashboard/
-│   └── app.py
-│
 ├── scripts/
-│   ├── start-demo.sh
-│   ├── download-models.sh
-│   ├── run-baseline.sh
-│   ├── run-speculative.sh
-│   └── run-dashboard.sh
+    ├── helpers/
+    │   ├── _baseline.sh
+    │   ├── _download_models.sh
+    │   ├── _speculative.sh
+    │   └── _streamlit.sh
+│   ├── common.sh
+│   ├── setup_env.sh
+│   ├── start_monitor.sh
+│   └── start_vllm.sh
 │
+├── .gitignore
+├── config.env
 ├── requirements.txt
 └── README.md
 ```
@@ -228,29 +242,21 @@ You should automatically land in:
 
 ## 7. Start the Demo
 
-Run:
+Run (in this order):
 
 ```bash
-HF_TOKEN="hf_xxx" ./scripts/start-demo.sh
+HF_TOKEN="hf_xxx"
+./scripts/setup_env.sh
+./scripts/start-monitor.sh
+./scripts/start-vllm.sh
 ```
 
-The script will:
-
-- create the Python virtual environment
-- install Python dependencies
-- authenticate with Hugging Face
-- download model weights from HF
-- start:
-  - baseline vLLM server
-  - speculative vLLM server
-  - Streamlit dashboard
-
-The script prints:
+The scripts prints:
 
 ```text
 Baseline vLLM:    http://<instance-ip>:8000
 Speculative vLLM: http://<instance-ip>:8001
-Dashboard:        http://<instance-ip>:8501
+Streamlit:        http://<instance-ip>:8501
 ```
 
 Open the dashboard in your browser:
@@ -270,8 +276,7 @@ To change runtime settings such as:
 - model selection
 
 ```text
-config/baseline.env
-config/speculative.env
+config.env
 ```
 
 Example:
