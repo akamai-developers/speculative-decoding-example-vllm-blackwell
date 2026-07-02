@@ -5,7 +5,8 @@ import threading
 import streamlit as st
 from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor
-from streamlit.runtime.scriptrunner import get_script_run_context, add_script_run_context
+# Fixed internal framework imports
+from streamlit.runtime.scriptrunner import get_script_run_ctx, add_script_run_ctx
 
 BASELINE_URL = "http://127.0.0.1:8000/v1"
 SPEC_URL = "http://127.0.0.1:8001/v1"
@@ -190,17 +191,17 @@ if execute_race:
     baseline_output_slot.info("Awaiting Stream Dispatch...")
     spec_output_slot.info("Awaiting Stream Dispatch...")
 
-    # Capture the context of the current script runner thread
-    ctx = get_script_run_context()
+    # Capture the thread context cleanly using correct names
+    ctx = get_script_run_ctx()
 
-    def run_in_context(client, prompt, max_tokens, temp, slot):
-        # Register the saved session context into this background thread worker
-        add_script_run_context(threading.current_thread())
+    def run_with_runtime_context(client, prompt, max_tokens, temp, slot):
+        # Bind parent script run context explicitly to this specific thread execution block
+        add_script_run_ctx(threading.current_thread(), ctx)
         return stream_engine(client, prompt, max_tokens, temp, slot)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        future_baseline = executor.submit(run_in_context, baseline_client, prompt, max_tokens, temperature, baseline_output_slot)
-        future_spec = executor.submit(run_in_context, spec_client, prompt, max_tokens, temperature, spec_output_slot)
+        future_baseline = executor.submit(run_with_runtime_context, baseline_client, prompt, max_tokens, temperature, baseline_output_slot)
+        future_spec = executor.submit(run_with_runtime_context, spec_client, prompt, max_tokens, temperature, spec_output_slot)
         
         while not (future_baseline.done() and future_spec.done()):
             time.sleep(0.1)
