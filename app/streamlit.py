@@ -10,40 +10,37 @@ from streamlit.runtime.scriptrunner import get_script_run_ctx, add_script_run_ct
 BASELINE_URL = "http://127.0.0.1:8000/v1"
 SPEC_URL = "http://127.0.0.1:8001/v1"
 PROMETHEUS_URL = "http://127.0.0.1:9090"
-
 TARGET_MODEL = os.getenv("TARGET_MODEL")
 
 baseline_client = OpenAI(base_url=BASELINE_URL, api_key="EMPTY")
 spec_client = OpenAI(base_url=SPEC_URL, api_key="EMPTY")
 
-JSON_PROMPT = """Generate a JSON array of 20 synthetic API request logs.
-Each object must follow this schema:
-{
-  "request_id": string,
-  "endpoint": string,
-  "method": "GET" | "POST" | "DELETE",
-  "status_code": number,
-  "latency_ms": number,
-  "cached": boolean
+# --- REAL ENTERPRISE COMPLIANCE PROMPT LAYER ---
+COMPLIANCE_TEXT_BLOCK = """
+[TIMESTAMP 00:14:22] AUDIT RECORD EXCERPT: The entity's primary fiscal steering committee reviewed unhedged international volatile asset surfaces. Operational capital preserves were systematically re-allocated across regional holdings to buffer liquidity degradation vectors. The CFO affirmed during the live presentation that while foreign exchange metrics show persistent downward pressure, our current exposure matrix maintains a highly predictable, risk-adjusted profile without relying on artificial valuation multipliers. Moving on to secondary market derivatives...
+"""
+
+INSTRUCTION_BLOCK = """
+\n\n[REGULATORY AUDIT MANDATE]
+Analyze the entire transaction audit logging history above. 
+Verify if the financial executor explicitly guaranteed yields or used the phrase 'guaranteed yield' regarding volatile asset classes.
+Output exactly one concise sentence declaring your final compliance determination and cite the section timestamp.
+"""
+
+# Build real scaling prompts using exact text repetitions so the audience sees the scale
+PROMPTS = {
+    "8K Context": (COMPLIANCE_TEXT_BLOCK * 70) + INSTRUCTION_BLOCK,
+    "24K Context": (COMPLIANCE_TEXT_BLOCK * 210) + INSTRUCTION_BLOCK,
+    "32K Context": (COMPLIANCE_TEXT_BLOCK * 280) + INSTRUCTION_BLOCK
 }
-Return only valid JSON."""
 
-CREATIVE_PROMPT = """Write a short fictional story about an engineer debugging a mysterious latency spike before a live demo."""
-
-if "json_results" not in st.session_state:
-    st.session_state.json_results = {"base_res": None, "spec_res": None}
-if "creative_results" not in st.session_state:
-    st.session_state.creative_results = {"base_res": None, "spec_res": None}
-
-def make_context(target_tokens: int) -> str:
-    target_chars = target_tokens * 4
-    filler = (
-        "Background context: vLLM serves LLM requests using batching, KV cache, "
-        "prefill, decode, CUDA kernels, scheduling, and memory management. "
-        "Speculative decoding uses a smaller draft model to propose tokens that "
-        "the target model verifies. "
-    )
-    return (filler * ((target_chars // len(filler)) + 1))[:target_chars]
+# Initialize multi-tab persistence states
+if "d2_state" not in st.session_state:
+    st.session_state.d2_state = {
+        "8K Context": {"base_res": None, "spec_res": None},
+        "24K Context": {"base_res": None, "spec_res": None},
+        "32K Context": {"base_res": None, "spec_res": None}
+    }
 
 def query_prometheus(query: str):
     try:
@@ -54,19 +51,15 @@ def query_prometheus(query: str):
     except Exception:
         return 0.0
 
-def stream_engine(client, prompt: str, max_tokens: int, temp: float, output_slot):
-    start_accepted = query_prometheus("sum(vllm:spec_decode_num_accepted_tokens_total)")
-    start_drafted = query_prometheus("sum(vllm:spec_decode_num_draft_tokens_total)")
-
+def stream_engine(client, prompt: str, max_tokens: int, output_slot):
     start = time.perf_counter()
     first_token_time = None
     text = ""
     token_count = 0
-    
     try:
         stream = client.chat.completions.create(
             model=TARGET_MODEL, messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_tokens, temperature=temp, stream=True,
+            max_tokens=max_tokens, temperature=0.0, stream=True,
             stream_options={"include_usage": True}
         )
         for chunk in stream:
@@ -77,168 +70,97 @@ def stream_engine(client, prompt: str, max_tokens: int, temp: float, output_slot
                         first_token_time = time.perf_counter() - start
                     text += delta
                     output_slot.markdown(text)
-            
             if hasattr(chunk, "usage") and chunk.usage is not None:
                 token_count = chunk.usage.completion_tokens
 
         total_latency = time.perf_counter() - start
         generation_time = total_latency - (first_token_time or 0)
-        
         if token_count == 0:
             token_count = len(text.split())
 
-        tpot = (generation_time / token_count) * 1000 if token_count > 0 else 0
-        tps = token_count / total_latency if total_latency > 0 else 0
-        
-        time.sleep(0.4)
-        end_accepted = query_prometheus("sum(vllm:spec_decode_num_accepted_tokens_total)")
-        end_drafted = query_prometheus("sum(vllm:spec_decode_num_draft_tokens_total)")
-        
-        run_accepted = end_accepted - start_accepted
-        run_drafted = end_drafted - start_drafted
-        run_rate = (run_accepted / run_drafted) * 100 if run_drafted > 0 else 0.0
-
         return {
             "latency": total_latency, "ttft": first_token_time, "tokens": token_count,
-            "tokens_per_second": tps, "tpot": tpot, "text": text, "run_rate": run_rate
+            "tokens_per_second": token_count / total_latency if total_latency > 0 else 0,
+            "tpot": (generation_time / token_count) * 1000 if token_count > 0 else 0, "text": text
         }
     except Exception as e:
-        output_slot.error(f"Execution failed: {e}")
+        output_slot.error(f"Inference Fault: {e}")
         return None
 
-st.set_page_config(page_title="vLLM Speculative Decoding Arena", layout="wide")
-st.title("⚡ vLLM Live Inference Optimization Arena")
+st.set_page_config(page_title="vLLM Context Arena", layout="wide")
+st.title("⚡ Demo 2: Context Window Scaling Bounds")
 
-st.sidebar.header("Navigation")
-demo = st.sidebar.radio("Select Demo Scenario", ["Demo 1: Workload Predictability", "Demo 2: Context Scaling", "Demo 3: Production Stress Note"])
-temperature = st.sidebar.slider("Temperature (Creativity)", 0.0, 1.0, 0.2, step=0.1)
+# Create selection for the 3 distinct context tiers
+context_tier = st.radio("Select Active Context Window Size", ["8K Context", "24K Context", "32K Context"], horizontal=True)
 
-if demo == "Demo 1: Workload Predictability":
-    tab_selection = st.radio("Workload Pathway", ["📋 Structured Task (JSON)", "🎨 Open-Ended Task (Creative)"], horizontal=True)
-    max_tokens = st.sidebar.slider("Max Output Tokens", 128, 1024, 384, step=64)
-    
-    if tab_selection == "📋 Structured Task (JSON)":
-        active_key = "json_results"
-        prompt = JSON_PROMPT
-    else:
-        active_key = "creative_results"
-        prompt = CREATIVE_PROMPT
-        
-    with st.expander("🔍 View Prompt Running on Stage", expanded=True):
-        st.code(prompt, language="text")
-
-elif demo == "Demo 2: Context Scaling":
-    active_key = None
-    context_choice = st.sidebar.radio("Prompt Context Window Size", ["8K", "24K", "32K"])
-    context_tokens = {"8K": 7500, "24K": 23500, "32K": 31500}[context_choice]
-    max_tokens = 256
-    raw_context = make_context(context_tokens)
-    instruction = "\n\nTask: Summarize the architecture of vLLM in 3 concise sentences."
-    prompt = raw_context + instruction
-    
-    with st.expander("🔍 View Prompt Running on Stage (Large Context)", expanded=True):
-        st.write(f"**Prefix Padding Length:** ~{context_tokens} tokens")
-        st.code(instruction.strip(), language="text")
-
-else:
-    st.info("💡 **Demo 3 Instructions:** Transition to your live Grafana dashboard layout now. Fire up your external load generator to showcase concurrent scaling overhead.")
-    st.stop()
+with st.expander("🔍 View Active Compliance Prompt Footprint Running on GPU", expanded=False):
+    st.write(f"**Total Document Payload Footprint:** ~{context_tier}")
+    st.text(PROMPTS[context_tier][:1200] + "\n\n [... MIDDLE OMITTED FOR VIEWPORT ...]\n\n" + INSTRUCTION_BLOCK)
 
 st.divider()
 
 col_btn1, col_btn2 = st.columns([1, 4])
 with col_btn1:
-    execute_race = st.button("🚀 Run Simultaneous Race", type="primary")
+    execute_race = st.button("🚀 Run Scaled Context Race", type="primary")
 with col_btn2:
-    if st.button("Clear Playback Matrix"):
-        st.session_state.clear()
+    if st.button("Clear Context Matrices"):
+        st.session_state.d2_state = {k: {"base_res": None, "spec_res": None} for k in PROMPTS.keys()}
         st.rerun()
 
 metric_col1, metric_col2 = st.columns(2)
 with metric_col1:
     st.subheader("🤖 Traditional Baseline Engine")
-    b_latency = st.empty()
-    b_ttft = st.empty()
-    b_tps = st.empty()
-    b_tpot = st.empty()
+    b_latency, b_ttft, b_tps, b_tpot = st.empty(), st.empty(), st.empty(), st.empty()
     speedup_slot = st.empty()
-    st.caption("Streaming Workspace")
     baseline_output_slot = st.empty()
 
 with metric_col2:
     st.subheader("🚀 Speculative Accelerated Engine")
-    s_latency = st.empty()
-    s_ttft = st.empty()
-    s_tps = st.empty()
-    s_tpot = st.empty()
-    spec_breakdown_slot = st.empty()
-    st.caption("Streaming Workspace")
+    s_latency, s_ttft, s_tps, s_tpot = st.empty(), st.empty(), st.empty(), st.empty()
     spec_output_slot = st.empty()
 
-def display_persisted_metrics(base_res, spec_res):
-    if base_res:
-        b_latency.metric("Total Request Time", f"{base_res['latency']:.2f}s")
-        b_ttft.metric("Time to First Token (TTFT)", f"{base_res['ttft']:.3f}s")
-        b_tps.metric("Output Tokens Per Second", f"{base_res['tokens_per_second']:.1f} tok/s")
-        b_tpot.metric("Time Per Output Token (TPOT)", f"{base_res['tpot']:.1f} ms/tok")
-        baseline_output_slot.markdown(base_res['text'])
+def render_metrics(base, spec):
+    if base:
+        b_latency.metric("Total Request Time", f"{base['latency']:.2f}s")
+        b_ttft.metric("Time to First Token (TTFT - Prefill)", f"{base['ttft']:.3f}s")
+        b_tps.metric("Output Tokens Per Second", f"{base['tokens_per_second']:.1f} tok/s")
+        b_tpot.metric("Time Per Output Token (TPOT - Decode)", f"{base['tpot']:.1f} ms/tok")
+        baseline_output_slot.markdown(base['text'])
     else:
-        b_latency.metric("Total Request Time", "—")
-        b_ttft.metric("Time to First Token (TTFT)", "—")
-        b_tps.metric("Output Tokens Per Second", "—")
-        b_tpot.metric("Time Per Output Token (TPOT)", "—")
-
-    if spec_res:
-        s_latency.metric("Total Request Time", f"{spec_res['latency']:.2f}s")
-        s_ttft.metric("Time to First Token (TTFT)", f"{spec_res['ttft']:.3f}s")
-        s_tps.metric("Output Tokens Per Second", f"{spec_res['tokens_per_second']:.1f} tok/s")
-        s_tpot.metric("Time Per Output Token (TPOT)", f"{spec_res['tpot']:.1f} ms/tok")
-        spec_output_slot.markdown(spec_res['text'])
-        spec_breakdown_slot.metric("Draft Acceptance Rate (This Run)", f"{spec_res['run_rate']:.1f}%")
+        for slot in [b_latency, b_ttft, b_tps, b_tpot]: slot.metric("—", "—")
+        
+    if spec:
+        s_latency.metric("Total Request Time", f"{spec['latency']:.2f}s")
+        s_ttft.metric("Time to First Token (TTFT - Prefill)", f"{spec['ttft']:.3f}s")
+        s_tps.metric("Output Tokens Per Second", f"{spec['tokens_per_second']:.1f} tok/s")
+        s_tpot.metric("Time Per Output Token (TPOT - Decode)", f"{spec['tpot']:.1f} ms/tok")
+        spec_output_slot.markdown(spec['text'])
     else:
-        s_latency.metric("Total Request Time", "—")
-        s_ttft.metric("Time to First Token (TTFT)", "—")
-        s_tps.metric("Output Tokens Per Second", "—")
-        s_tpot.metric("Time Per Output Token (TPOT)", "—")
-        spec_breakdown_slot.metric("Draft Acceptance Rate (This Run)", "—")
+        for slot in [s_latency, s_ttft, s_tps, s_tpot]: slot.metric("—", "—")
 
-    if base_res and spec_res and spec_res['latency'] > 0:
-        net_speedup = base_res['latency'] / spec_res['latency']
+    if base and spec:
+        net_speedup = base['latency'] / spec['latency']
         speedup_slot.metric("Net Speedup Performance Delta", f"{net_speedup:.2f}x Faster")
     else:
         speedup_slot.metric("Net Speedup Performance Delta", "—")
 
-if demo == "Demo 1: Workload Predictability" and active_key:
-    display_persisted_metrics(
-        st.session_state[active_key]["base_res"],
-        st.session_state[active_key]["spec_res"]
-    )
-else:
-    display_persisted_metrics(None, None)
+# Display frozen metrics if they exist for this specific context tab
+render_metrics(st.session_state.d2_state[context_tier]["base_res"], st.session_state.d2_state[context_tier]["spec_res"])
 
 if execute_race:
-    baseline_output_slot.info("Warming baseline streaming pipes...")
-    spec_output_slot.info("Warming speculative acceleration layer...")
-
+    baseline_output_slot.info("Executing standard baseline model prefill phase...")
+    spec_output_slot.info("Executing speculative acceleration model prefill phase...")
+    
     ctx = get_script_run_ctx()
-
-    def run_with_runtime_context(client, prompt, max_tokens, temp, slot):
+    def run_with_ctx(client, p, max_tok, slot):
         add_script_run_ctx(threading.current_thread(), ctx)
-        return stream_engine(client, prompt, max_tokens, temp, slot)
+        return stream_engine(client, p, max_tok, slot)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        future_baseline = executor.submit(run_with_runtime_context, baseline_client, prompt, max_tokens, temperature, baseline_output_slot)
-        future_spec = executor.submit(run_with_runtime_context, spec_client, prompt, max_tokens, temperature, spec_output_slot)
-        
-        while not (future_baseline.done() and future_spec.done()):
-            time.sleep(0.1)
+        f_base = executor.submit(run_with_ctx, baseline_client, PROMPTS[context_tier], 128, baseline_output_slot)
+        f_spec = executor.submit(run_with_ctx, spec_client, PROMPTS[context_tier], 128, spec_output_slot)
+        while not (f_base.done() and f_spec.done()): time.sleep(0.1)
 
-    base_res = future_baseline.result()
-    spec_res = future_spec.result()
-
-    if demo == "Demo 1: Workload Predictability" and active_key:
-        st.session_state[active_key]["base_res"] = base_res
-        st.session_state[active_key]["spec_res"] = spec_res
-        st.rerun()
-    else:
-        display_persisted_metrics(base_res, spec_res)
+    st.session_state.d2_state[context_tier]["base_res"] = f_base.result()
+    st.session_state.d2_state[context_tier]["spec_res"] = f_spec.result()
+    st.rerun()
