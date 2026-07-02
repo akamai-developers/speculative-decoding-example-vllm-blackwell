@@ -1,9 +1,11 @@
 import os
 import time
 import requests
+import threading
 import streamlit as st
 from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor
+from streamlit.runtime.scriptrunner import get_script_run_context, add_script_run_context
 
 BASELINE_URL = "http://127.0.0.1:8000/v1"
 SPEC_URL = "http://127.0.0.1:8001/v1"
@@ -63,7 +65,6 @@ def query_prometheus(query: str):
         return None
 
 def get_detailed_spec_metrics():
-    # Grabs raw historical counters directly from vLLM telemetry
     accepted_query = "sum(vllm:spec_decode_num_accepted_tokens_total)"
     drafted_query = "sum(vllm:spec_decode_num_draft_tokens_total)"
     
@@ -114,7 +115,6 @@ def stream_engine(client, prompt: str, max_tokens: int, temp: float, output_slot
 st.set_page_config(page_title="vLLM Speculative Decoding Demo", layout="wide")
 st.title("⚡ vLLM Live Inference Optimization Arena")
 
-# Sidebar Architecture Controls
 st.sidebar.header("Execution Profile")
 demo = st.sidebar.radio(
     "Select Scenario",
@@ -144,7 +144,6 @@ with st.expander("Inspect Raw Input Payload", expanded=False):
 
 st.divider()
 
-# Action Row (Single Unified Button execution)
 col_btn1, col_btn2 = st.columns([1, 4])
 with col_btn1:
     execute_race = st.button("🚀 Run Simultaneous Race", type="primary")
@@ -153,7 +152,6 @@ with col_btn2:
         st.session_state.clear()
         st.rerun()
 
-# Layout Containers for Streaming Content Side-by-Side
 metric_col1, metric_col2 = st.columns(2)
 with metric_col1:
     st.subheader("🤖 Traditional Target Engine (Baseline)")
@@ -171,7 +169,6 @@ with metric_col2:
     st.caption("Generation Sandbox")
     spec_output_slot = st.empty()
 
-# Persistent Global Diagnostic Verdicts
 st.divider()
 st.subheader("📊 Architectural Evaluation Summary")
 summary_col1, summary_col2 = st.columns(2)
@@ -180,7 +177,6 @@ with summary_col1:
 with summary_col2:
     spec_breakdown_slot = st.empty()
 
-# INITIAL STATE PLACEHOLDERS
 b_latency.metric("Total Generation Time", "—")
 b_ttft.metric("Time to First Token (Prefill)", "—")
 b_tps.metric("Generation Throughput", "—")
@@ -194,10 +190,17 @@ if execute_race:
     baseline_output_slot.info("Awaiting Stream Dispatch...")
     spec_output_slot.info("Awaiting Stream Dispatch...")
 
-    # THREAD POOL DISPATCH: Executes both engine queries on the network block simultaneously
+    # Capture the context of the current script runner thread
+    ctx = get_script_run_context()
+
+    def run_in_context(client, prompt, max_tokens, temp, slot):
+        # Register the saved session context into this background thread worker
+        add_script_run_context(threading.current_thread())
+        return stream_engine(client, prompt, max_tokens, temp, slot)
+
     with ThreadPoolExecutor(max_workers=2) as executor:
-        future_baseline = executor.submit(stream_engine, baseline_client, prompt, max_tokens, temperature, baseline_output_slot)
-        future_spec = executor.submit(stream_engine, spec_client, prompt, max_tokens, temperature, spec_output_slot)
+        future_baseline = executor.submit(run_in_context, baseline_client, prompt, max_tokens, temperature, baseline_output_slot)
+        future_spec = executor.submit(run_in_context, spec_client, prompt, max_tokens, temperature, spec_output_slot)
         
         while not (future_baseline.done() and future_spec.done()):
             time.sleep(0.1)
@@ -215,7 +218,6 @@ if execute_race:
         s_ttft.metric("Time to First Token (Prefill)", f"{spec_res['ttft']:.3f}s")
         s_tps.metric("Generation Throughput", f"{spec_res['tokens_per_second']:.1f} tok/s")
         
-        # Real-time Telemetry pull directly matching requested counters
         accepted, drafted, rate = get_detailed_spec_metrics()
         if rate:
             spec_breakdown_slot.metric(
