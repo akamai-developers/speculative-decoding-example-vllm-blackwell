@@ -232,8 +232,8 @@ Run (in this order):
 ```bash
 export HF_TOKEN="hf_xxx"
 ./scripts/setup_env.sh
-./scripts/start-monitor.sh
-./scripts/start-vllm.sh
+./scripts/start_monitor.sh
+./scripts/start_vllm.sh
 ```
 
 The scripts prints:
