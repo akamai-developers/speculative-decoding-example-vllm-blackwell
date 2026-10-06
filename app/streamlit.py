@@ -133,7 +133,7 @@ def build_audit_prompt(target_tokens, seed=42, evidence_fraction=0.70):
 
 @st.cache_data
 def get_d2_prompt(context_label):
-    D2_TARGETS = {"~8K Context": 8_000, "~24K Context": 24_000, "~32K Context": 32_000}
+    D2_TARGETS = {"8K": 8_000, "24K": 24_000, "32K": 32_000}
     target = D2_TARGETS[context_label]
     prompt, estimated, records, position = build_audit_prompt(target)
     meta = {
@@ -158,9 +158,9 @@ if "d1_state" not in st.session_state:
 
 if "d2_state" not in st.session_state:
     st.session_state.d2_state = {
-        "~8K Context": {"base_res": None, "spec_res": None},
-        "~24K Context": {"base_res": None, "spec_res": None},
-        "~32K Context": {"base_res": None, "spec_res": None}
+        "8K": {"base_res": None, "spec_res": None},
+        "24K": {"base_res": None, "spec_res": None},
+        "32K": {"base_res": None, "spec_res": None}
     }
 
 # ==============================================================================
@@ -233,7 +233,7 @@ def stream_engine(client, prompt: str, max_tokens: int, temp: float, output_slot
 # ==============================================================================
 
 st.set_page_config(page_title="vLLM Inference Optimization Arena", layout="wide")
-st.title("⚡ vLLM Live Inference Optimization Arena")
+st.title("vLLM Live Inference Optimization Arena")
 
 st.sidebar.header("Navigation")
 demo = st.sidebar.radio("Select Demo Scenario", ["Demo 1: Workload Predictability", "Demo 2: Context Scaling", "Demo 3: Production Stress Note"])
@@ -261,7 +261,7 @@ elif demo == "Demo 2: Context Scaling":
     max_tokens = 128   
     
     st.markdown("### DEMO 2 — CONTEXT SCALING")
-    context_tier = st.radio("Context:", ["~8K", "~24K", "~32K"], horizontal=True)
+    context_tier = st.radio("Context:", ["8K", "24K", "32K"], horizontal=True)
     
     prompt, meta = get_d2_prompt(context_tier)
     st.markdown(f"**Actual Input Tokens:** `{meta['estimated_tokens']:,}`")
@@ -282,7 +282,7 @@ st.divider()
 
 col_btn1, col_btn2 = st.columns([1, 4])
 with col_btn1:
-    execute_race = st.button("🚀 Run Experiment", type="primary")
+    execute_race = st.button("Run Experiment", type="primary")
 with col_btn2:
     if st.button("Clear Playback Matrices"):
         if demo == "Demo 1: Workload Predictability":
@@ -328,9 +328,9 @@ with metric_col2:
         ttft_diff = ((spec_res['ttft'] - base_res['ttft']) / base_res['ttft']) * 100
         st.markdown(f"### `{spec_res['ttft']:.3f}s`")
         if ttft_diff > 0:
-            st.warning(f"↑ {ttft_diff:.0f}% slower", icon="⚠️")
+            st.warning(f"↑ {ttft_diff:.0f}% slower")
         else:
-            st.success(f"↓ {abs(ttft_diff):.0f}% faster", icon="⚡")
+            st.success(f"↓ {abs(ttft_diff):.0f}% faster")
     elif spec_res and spec_res.get('ttft'):
         st.markdown(f"### `{spec_res['ttft']:.3f}s`")
     else:
@@ -341,7 +341,7 @@ with metric_col2:
         speedup_val = spec_res['tokens_per_second'] / max(0.1, base_res['tokens_per_second'])
         pct_increase = ((spec_res['tokens_per_second'] - base_res['tokens_per_second']) / max(0.1, base_res['tokens_per_second'])) * 100
         st.markdown(f"### `{spec_res['tokens_per_second']:.1f} tok/s`")
-        st.success(f"↑ {speedup_val:.2f}× (+{pct_increase:.0f}%)", icon="📈")
+        st.success(f"↑ {speedup_val:.2f}× (+{pct_increase:.0f}%)")
     elif spec_res:
         st.markdown(f"### `{spec_res['tokens_per_second']:.1f} tok/s`")
     else:
@@ -352,9 +352,9 @@ with metric_col2:
         lat_reduction = ((base_res['latency'] - spec_res['latency']) / max(0.001, base_res['latency'])) * 100
         st.markdown(f"### `{spec_res['latency']:.2f}s`")
         if lat_reduction > 0:
-            st.info(f"↓ {lat_reduction:.0f}%", icon="⚡")
+            st.info(f"↓ {lat_reduction:.0f}%")
         else:
-            st.warning(f"↑ {abs(lat_reduction):.0f}% slower", icon="⚠️")
+            st.warning(f"↑ {abs(lat_reduction):.0f}% slower")
     elif spec_res:
         st.markdown(f"### `{spec_res['latency']:.2f}s`")
     else:
@@ -364,31 +364,6 @@ with metric_col2:
     st.markdown(f"### `{spec_res['run_rate']:.1f}%`" if spec_res else "`—`")
 
 st.divider()
-
-# Net Speedup Banner Box
-if base_res and spec_res and spec_res['latency'] > 0:
-    net_speedup = base_res['latency'] / spec_res['latency']
-    st.markdown(
-        f"""
-        <div style="background-color: #1e293b; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #334155;">
-            <p style="color: #94a3b8; font-size: 14px; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 1px;">⚡ NET SPEEDUP</p>
-            <h2 style="color: #38bdf8; margin: 0; font-size: 32px;">{net_speedup:.2f}×</h2>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-else:
-    st.markdown(
-        """
-        <div style="background-color: #1e293b; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #334155;">
-            <p style="color: #94a3b8; font-size: 14px; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 1px;">⚡ NET SPEEDUP</p>
-            <h2 style="color: #94a3b8; margin: 0; font-size: 32px;">—</h2>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-st.markdown("<br>", unsafe_allow_html=True)
 
 # Advanced Speculative Metrics Expander
 with st.expander("▼ Advanced Speculative Metrics"):
