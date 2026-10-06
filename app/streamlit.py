@@ -78,6 +78,11 @@ def generate_audit_record(i, rng):
         accounts=rng.randint(3, 240), pct=rng.randint(2, 35), outcome=rng.choice(OUTCOMES)
     )
 
+# ==============================================================================
+# CACHED TOKENIZER & LAZY PROMPT GENERATION (ELIMINATES LAG)
+# ==============================================================================
+
+@st.cache_resource
 def load_target_tokenizer():
     try:
         from transformers import AutoTokenizer
@@ -106,13 +111,18 @@ def build_audit_prompt(target_tokens, seed=42, evidence_fraction=0.70):
     prompt = "\n".join(records) + AUDIT_INSTRUCTION
     return prompt, count_prompt_tokens(prompt), len(records), evidence_fraction
 
-D2_TARGETS = {"8K Context": 8_000, "24K Context": 24_000, "32K Context": 32_000}
-D2_PROMPTS = {}
-D2_META = {}
-for _label, _target in D2_TARGETS.items():
-    _prompt, _estimated, _records, _position = build_audit_prompt(_target)
-    D2_PROMPTS[_label] = _prompt
-    D2_META[_label] = {"target_tokens": _target, "estimated_tokens": _estimated, "records": _records, "evidence_position": _position}
+@st.cache_data
+def get_d2_prompt(context_label):
+    D2_TARGETS = {"8K Context": 8_000, "24K Context": 24_000, "32K Context": 32_000}
+    target = D2_TARGETS[context_label]
+    prompt, estimated, records, position = build_audit_prompt(target)
+    meta = {
+        "target_tokens": target, 
+        "estimated_tokens": estimated, 
+        "records": records, 
+        "evidence_position": position
+    }
+    return prompt, meta
 
 # ============================================================================== 
 # SESSION STATE INITIALIZATION
@@ -174,7 +184,6 @@ def stream_engine(client, prompt: str, max_tokens: int, temp: float, output_slot
                     prompt_token_count = chunk.usage.prompt_tokens
 
         total_latency = time.perf_counter() - start
-        generation_time = total_latency - (first_token_time or 0)
         if token_count == 0:
             token_count = len(text.split())
 
@@ -224,9 +233,11 @@ elif demo == "Demo 2: Context Scaling":
     temperature = 0.0  
     max_tokens = 128   
     context_tier = st.radio("Select Active Context Window Size", ["8K Context", "24K Context", "32K Context"], horizontal=True)
-    prompt = D2_PROMPTS[context_tier]
+    
+    # Lazy load active context tier (cached instantly after first load)
+    prompt, meta = get_d2_prompt(context_tier)
+    
     with st.expander("🔍 Inspect Synthetic Audit Context", expanded=True):
-        meta = D2_META[context_tier]
         st.write(f"**Target context:** {meta['target_tokens']:,} tokens")
         st.write(f"**Construction token estimate:** {meta['estimated_tokens']:,} tokens")
         st.write(f"**Synthetic records:** {meta['records']:,}")
@@ -249,82 +260,52 @@ with col_btn2:
         if demo == "Demo 1: Workload Predictability":
             st.session_state.d1_state = {"json_results": {"base_res": None, "spec_res": None}, "creative_results": {"base_res": None, "spec_res": None}}
         else:
-            st.session_state.d2_state = {k: {"base_res": None, "spec_res": None} for k in D2_PROMPTS.keys()}
+            st.session_state.d2_state = {k: {"base_res": None, "spec_res": None} for k in ["8K Context", "24K Context", "32K Context"]}
         st.rerun()
 
-# Layout Metric Columns
+# Layout Metric Columns for Demo 1 / Workspace
 metric_col1, metric_col2 = st.columns(2)
 with metric_col1:
     st.subheader("🤖 Traditional Baseline Engine")
-    b_metric1, b_metric2, b_metric3, b_metric4, b_metric5 = st.empty(), st.empty(), st.empty(), st.empty(), st.empty()
-    speedup_slot = st.empty()
+    b_throughput, b_latency, b_acceptance = st.empty(), st.empty(), st.empty()
     st.caption("Streaming Workspace")
     baseline_output_slot = st.empty()
 
 with metric_col2:
     st.subheader("🚀 Speculative Accelerated Engine")
-    s_metric1, s_metric2, s_metric3, s_metric4, s_metric5 = st.empty(), st.empty(), st.empty(), st.empty(), st.empty()
-    spec_breakdown_slot = st.empty()
+    s_throughput, s_latency, s_acceptance = st.empty(), st.empty(), st.empty()
     st.caption("Streaming Workspace")
     spec_output_slot = st.empty()
 
+speedup_slot = st.empty()
+
 # ==============================================================================
-# CONDITIONAL METRIC RENDER LOGIC (TAILORED PER DEMO)
+# RENDER LOGIC
 # ==============================================================================
 
-def display_persisted_metrics(base_res, spec_res, current_demo):
-    if current_demo == "Demo 1: Workload Predictability":
-        # Demo 1: Acceptance Rate, Decode Throughput, E2E Latency (No TTFT, No TPOT)
-        if base_res:
-            b_metric1.metric("Total Request Time (E2E)", f"{base_res['latency']:.2f}s")
-            b_metric2.metric("Decode Throughput", f"{base_res['tokens_per_second']:.1f} tok/s")
-            b_metric3.empty()
-            b_metric4.empty()
-            b_metric5.empty()
-            baseline_output_slot.markdown(base_res['text'])
-        else:
-            for slot in [b_metric1, b_metric2, b_metric3, b_metric4, b_metric5]: slot.empty()
+if demo == "Demo 1: Workload Predictability":
+    base_res = st.session_state.d1_state[active_key]["base_res"]
+    spec_res = st.session_state.d1_state[active_key]["spec_res"]
 
-        if spec_res:
-            s_metric1.metric("Total Request Time (E2E)", f"{spec_res['latency']:.2f}s")
-            s_metric2.metric("Decode Throughput", f"{spec_res['tokens_per_second']:.1f} tok/s")
-            s_metric3.empty()
-            s_metric4.empty()
-            s_metric5.empty()
-            spec_output_slot.markdown(spec_res['text'])
-            spec_breakdown_slot.metric("Draft Acceptance Rate", f"{spec_res['run_rate']:.1f}%")
-        else:
-            for slot in [s_metric1, s_metric2, s_metric3, s_metric4, s_metric5]: slot.empty()
-            spec_breakdown_slot.metric("Draft Acceptance Rate", "—")
+    if base_res:
+        b_throughput.metric("Decode Throughput", f"{base_res['tokens_per_second']:.1f} tok/s")
+        b_latency.metric("End-to-End Latency", f"{base_res['latency']:.2f}s")
+        b_acceptance.empty()
+        baseline_output_slot.markdown(base_res['text'])
+    else:
+        b_throughput.empty(); b_latency.empty(); b_acceptance.empty()
 
-    elif current_demo == "Demo 2: Context Scaling":
-        # Demo 2: Actual Input Tokens, TTFT, Acceptance Rate, Decode Throughput, E2E Latency (No TPOT)
-        if base_res:
-            b_metric1.metric("Actual Input Tokens", f"{base_res['prompt_tokens']:,} tokens")
-            b_metric2.metric("Time to First Token (TTFT)", f"{base_res['ttft']:.3f}s")
-            b_metric3.metric("Total Request Time (E2E)", f"{base_res['latency']:.2f}s")
-            b_metric4.metric("Decode Throughput", f"{base_res['tokens_per_second']:.1f} tok/s")
-            b_metric5.empty()
-            baseline_output_slot.markdown(base_res['text'])
-        else:
-            for slot in [b_metric1, b_metric2, b_metric3, b_metric4, b_metric5]: slot.empty()
+    if spec_res:
+        s_throughput.metric("Decode Throughput", f"{spec_res['tokens_per_second']:.1f} tok/s")
+        s_latency.metric("End-to-End Latency", f"{spec_res['latency']:.2f}s")
+        s_acceptance.metric("Draft Acceptance Rate", f"{spec_res['run_rate']:.1f}%")
+        spec_output_slot.markdown(spec_res['text'])
+    else:
+        s_throughput.empty(); s_latency.empty(); s_acceptance.empty()
 
-        if spec_res:
-            s_metric1.metric("Actual Input Tokens", f"{spec_res['prompt_tokens']:,} tokens")
-            s_metric2.metric("Time to First Token (TTFT)", f"{spec_res['ttft']:.3f}s")
-            s_metric3.metric("Total Request Time (E2E)", f"{spec_res['latency']:.2f}s")
-            s_metric4.metric("Decode Throughput", f"{spec_res['tokens_per_second']:.1f} tok/s")
-            s_metric5.empty()
-            spec_output_slot.markdown(spec_res['text'])
-            spec_breakdown_slot.metric("Draft Acceptance Rate", f"{spec_res['run_rate']:.1f}%")
-        else:
-            for slot in [s_metric1, s_metric2, s_metric3, s_metric4, s_metric5]: slot.empty()
-            spec_breakdown_slot.metric("Draft Acceptance Rate", "—")
-
-    # Net Speedup evaluation box
     if base_res and spec_res and spec_res['latency'] > 0:
         net_speedup = base_res['latency'] / spec_res['latency']
-        speedup_slot.metric("End-to-End Speculative Speedup", f"{net_speedup:.2f}x")
+        speedup_slot.metric("Net Speedup Performance Delta", f"{net_speedup:.2f}x Faster")
         if net_speedup > 1.05:
             st.success(f"Speculative decoding helped: {net_speedup:.2f}× lower end-to-end request time.")
         elif net_speedup < 0.95:
@@ -332,21 +313,60 @@ def display_persisted_metrics(base_res, spec_res, current_demo):
         else:
             st.info(f"Speculative decoding was roughly neutral: {net_speedup:.2f}×.")
     else:
-        speedup_slot.metric("End-to-End Speculative Speedup", "—")
+        speedup_slot.metric("Net Speedup Performance Delta", "—")
 
-# Render metrics based on active session tier
-if demo == "Demo 1: Workload Predictability":
-    display_persisted_metrics(
-        st.session_state.d1_state[active_key]["base_res"],
-        st.session_state.d1_state[active_key]["spec_res"],
-        demo
-    )
 elif demo == "Demo 2: Context Scaling":
-    display_persisted_metrics(
-        st.session_state.d2_state[context_tier]["base_res"],
-        st.session_state.d2_state[context_tier]["spec_res"],
-        demo
-    )
+    metric_col1.empty()
+    metric_col2.empty()
+    speedup_slot.empty()
+    
+    st.subheader("📊 Context Scaling Performance Matrix")
+    
+    base_res = st.session_state.d2_state[context_tier]["base_res"]
+    spec_res = st.session_state.d2_state[context_tier]["spec_res"]
+    
+    col_h1, col_h2, col_h3, col_h4, col_h5, col_h6, col_h7 = st.columns([1.2, 1.2, 1, 1, 1.2, 1.2, 1])
+    col_h1.markdown("**Engine / Context**")
+    col_h2.markdown("**Input Tokens**")
+    col_h3.markdown("**TTFT**")
+    col_h4.markdown("**Acceptance**")
+    col_h5.markdown("**Throughput**")
+    col_h6.markdown("**E2E Latency**")
+    col_h7.markdown("**Speedup**")
+    
+    st.divider()
+
+    def render_row(engine_label, res, is_spec=False, speedup_val=None):
+        r_c1, r_c2, r_c3, r_c4, r_c5, r_c6, r_c7 = st.columns([1.2, 1.2, 1, 1, 1.2, 1.2, 1])
+        r_c1.write(engine_label)
+        if res:
+            r_c2.write(f"{res['prompt_tokens']:,}")
+            r_c3.write(f"{res['ttft']:.3f}s")
+            r_c4.write(f"{res['run_rate']:.1f}%" if is_spec else "—")
+            r_c5.write(f"{res['tokens_per_second']:.1f} tok/s")
+            r_c6.write(f"{res['latency']:.2f}s")
+        else:
+            r_c2.write("—"); r_c3.write("—"); r_c4.write("—"); r_c5.write("—"); r_c6.write("—")
+            
+        if is_spec and speedup_val:
+            r_c7.metric("", f"{speedup_val:.2f}x")
+        else:
+            r_c7.write("—")
+
+    speedup_calc = (base_res['latency'] / spec_res['latency']) if (base_res and spec_res and spec_res['latency'] > 0) else None
+    
+    render_row("🤖 Baseline (Llama 8B)", base_res, is_spec=False)
+    render_row("🚀 Speculative Pair", spec_res, is_spec=True, speedup_val=speedup_calc)
+    
+    st.divider()
+    
+    col_out1, col_out2 = st.columns(2)
+    with col_out1:
+        st.caption("Baseline Output Workspace")
+        baseline_output_slot.markdown(base_res['text'] if base_res else "_Awaiting run..._")
+    with col_out2:
+        st.caption("Speculative Output Workspace")
+        spec_output_slot.markdown(spec_res['text'] if spec_res else "_Awaiting run..._")
 
 # ==============================================================================
 # EXECUTION RACE THREAD LOOPER
