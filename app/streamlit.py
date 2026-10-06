@@ -10,7 +10,6 @@ from streamlit.runtime.scriptrunner import get_script_run_ctx, add_script_run_ct
 
 BASELINE_URL = "http://127.0.0.1:8000/v1"
 SPEC_URL = "http://127.0.0.1:8001/v1"
-PROMETHEUS_URL = "http://127.0.0.1:9090"
 TARGET_MODEL = os.getenv("TARGET_MODEL")
 
 baseline_client = OpenAI(base_url=BASELINE_URL, api_key="EMPTY")
@@ -164,21 +163,30 @@ if "d2_state" not in st.session_state:
     }
 
 # ==============================================================================
-# ENGINE CORE FUNCTIONALITY
+# ENGINE CORE FUNCTIONALITY (DIRECT vLLM METRICS SCRAPER)
 # ==============================================================================
 
-def query_prometheus(query: str):
+def get_vllm_counter(metric_name: str) -> float:
     try:
-        response = requests.get(f"{PROMETHEUS_URL}/api/v1/query", params={"query": query}, timeout=3)
+        metrics_url = f"{SPEC_URL.replace('/v1', '')}/metrics"
+        response = requests.get(metrics_url, timeout=2)
         response.raise_for_status()
-        result = response.json()["data"]["result"]
-        return float(result[0]["value"][1]) if result else 0.0
+        total = 0.0
+        for line in response.text.splitlines():
+            if line.startswith(metric_name):
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    try:
+                        total += float(parts[-1])
+                    except ValueError:
+                        pass
+        return total
     except Exception:
         return 0.0
 
 def stream_engine(client, prompt: str, max_tokens: int, temp: float, output_slot):
-    start_accepted = query_prometheus("sum(vllm:spec_decode_num_accepted_tokens_total)")
-    start_drafted = query_prometheus("sum(vllm:spec_decode_num_draft_tokens_total)")
+    start_accepted = get_vllm_counter("vllm:spec_decode_num_accepted_tokens_total")
+    start_drafted = get_vllm_counter("vllm:spec_decode_num_draft_tokens_total")
 
     start = time.perf_counter()
     first_token_time = None
@@ -212,8 +220,8 @@ def stream_engine(client, prompt: str, max_tokens: int, temp: float, output_slot
         tps = token_count / total_latency if total_latency > 0 else 0
         time.sleep(0.4)
         
-        end_accepted = query_prometheus("sum(vllm:spec_decode_num_accepted_tokens_total)")
-        end_drafted = query_prometheus("sum(vllm:spec_decode_num_draft_tokens_total)")
+        end_accepted = get_vllm_counter("vllm:spec_decode_num_accepted_tokens_total")
+        end_drafted = get_vllm_counter("vllm:spec_decode_num_draft_tokens_total")
         run_accepted = end_accepted - start_accepted
         run_drafted = end_drafted - start_drafted
         run_rate = (run_accepted / run_drafted) * 100 if run_drafted > 0 else 0.0
