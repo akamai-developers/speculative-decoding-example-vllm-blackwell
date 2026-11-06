@@ -9,5 +9,6 @@ vllm serve "$TARGET_MODEL" \
   --gpu-memory-utilization "$SPEC_GPU_UTIL" \
   --max-model-len "$MAX_MODEL_LEN" \
   --max-num-seqs "$MAX_NUM_SEQS" \
+  --no-enable-prefix-caching \
   --speculative-config '{"method":"draft_model","model":"'"$DRAFT_MODEL"'","num_speculative_tokens":'"$NUM_SPEC_TOKENS"'}' \
   ${SPEC_EXTRA_ARGS:-}

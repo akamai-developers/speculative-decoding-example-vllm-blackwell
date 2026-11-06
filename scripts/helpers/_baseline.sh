@@ -7,4 +7,5 @@ vllm serve "$TARGET_MODEL" \
   --port 8000 \
   --gpu-memory-utilization "$BASELINE_GPU_UTIL" \
   --max-model-len "$MAX_MODEL_LEN" \
-  --max-num-seqs "$MAX_NUM_SEQS"
+  --max-num-seqs "$MAX_NUM_SEQS" \
+  --no-enable-prefix-caching
