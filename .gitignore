@@ -230,4 +230,4 @@ terraform.tfvars
 !terraform.tfvars.example
 
 ### my added files
-app/_app.py
+app/_app.py.DS_Store
