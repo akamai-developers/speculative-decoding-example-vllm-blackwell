@@ -1,17 +1,17 @@
 import os
 import time
 import random
+import statistics
 import requests
-import threading
 import pandas as pd
 import streamlit as st
 from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor
-from streamlit.runtime.scriptrunner import get_script_run_ctx, add_script_run_ctx
 
 BASELINE_URL = "http://127.0.0.1:8000/v1"
 SPEC_URL = "http://127.0.0.1:8001/v1"
 TARGET_MODEL = os.getenv("TARGET_MODEL")
+NUM_SPEC_TOKENS = int(os.getenv("NUM_SPEC_TOKENS", "5"))
 
 baseline_client = OpenAI(base_url=BASELINE_URL, api_key="EMPTY")
 spec_client = OpenAI(base_url=SPEC_URL, api_key="EMPTY")
@@ -123,165 +123,231 @@ def build_audit_prompt(target_tokens, seed=42, evidence_fraction=0.70):
     i = 0
     reserve = count_prompt_tokens(AUDIT_INSTRUCTION) + count_prompt_tokens(NEEDLE_RECORD) + 100
     body_target = max(500, target_tokens - reserve)
-    while count_prompt_tokens("\n".join(records)) < body_target:
-        records.append(generate_audit_record(i, rng))
-        i += 1
+    # Grow in batches and count occasionally; re-tokenizing every step is slow at 32K.
+    while True:
+        for _ in range(20):
+            records.append(generate_audit_record(i, rng))
+            i += 1
+        if count_prompt_tokens("\n".join(records)) >= body_target:
+            break
+    while len(records) > 1 and count_prompt_tokens("\n".join(records[:-1])) >= body_target:
+        records.pop()
     insert_at = max(1, min(len(records) - 1, int(len(records) * evidence_fraction)))
     records.insert(insert_at, NEEDLE_RECORD)
     prompt = "\n".join(records) + AUDIT_INSTRUCTION
     return prompt, count_prompt_tokens(prompt), len(records), evidence_fraction
 
+D2_TARGETS = {"1K": 1_000, "8K": 8_000, "16K": 16_000, "24K": 24_000, "32K": 32_000}
+
 @st.cache_data
 def get_d2_prompt(context_label):
-    D2_TARGETS = {"8K": 8_000, "24K": 24_000, "32K": 32_000}
     target = D2_TARGETS[context_label]
     prompt, estimated, records, position = build_audit_prompt(target)
     meta = {
-        "target_tokens": target, 
-        "estimated_tokens": estimated, 
-        "records": records, 
+        "target_tokens": target,
+        "estimated_tokens": estimated,
+        "records": records,
         "evidence_position": position
     }
     return prompt, meta
 
-# ============================================================================== 
+# ==============================================================================
 # SESSION STATE INITIALIZATION
-# ============================================================================== 
+# ==============================================================================
 
-if "d1_state" not in st.session_state:
-    st.session_state.d1_state = {
-        "JSON Generation": {"base_res": None, "spec_res": None},
-        "Structured Extraction": {"base_res": None, "spec_res": None},
-        "Creative Story": {"base_res": None, "spec_res": None},
-        "Brainstorming Incident Response": {"base_res": None, "spec_res": None}
-    }
-
-if "d2_state" not in st.session_state:
-    st.session_state.d2_state = {
-        "8K": {"base_res": None, "spec_res": None},
-        "24K": {"base_res": None, "spec_res": None},
-        "32K": {"base_res": None, "spec_res": None}
-    }
+# Results are keyed by experiment (e.g. "JSON Generation @ T=0.0"), so changing a
+# setting never overwrites an earlier run.
+if "results" not in st.session_state:
+    st.session_state.results = {}
 
 if "d3_results" not in st.session_state:
     st.session_state.d3_results = None
 
 # ==============================================================================
-# ENGINE CORE FUNCTIONALITY (DIRECT vLLM METRICS SCRAPER)
+# vLLM METRICS
 # ==============================================================================
 
-def get_vllm_counter(metric_name: str) -> float:
+ACCEPTED_METRIC = "vllm:spec_decode_num_accepted_tokens_total"
+DRAFTED_METRIC = "vllm:spec_decode_num_draft_tokens_total"
+DRAFTS_METRIC = "vllm:spec_decode_num_drafts_total"   # number of draft (verification) steps
+
+def get_vllm_counters(names) -> dict:
+    """Sum each counter across label sets from the speculative server's /metrics."""
+    totals = {n: 0.0 for n in names}
     try:
         metrics_url = f"{SPEC_URL.replace('/v1', '')}/metrics"
         response = requests.get(metrics_url, timeout=2)
         response.raise_for_status()
-        total = 0.0
         for line in response.text.splitlines():
-            if line.startswith(metric_name):
-                parts = line.strip().split()
-                if len(parts) >= 2:
+            if line.startswith("#"):
+                continue
+            for n in names:
+                # Exact metric name, followed by labels or a space (not a longer name).
+                if line.startswith(n + "{") or line.startswith(n + " "):
                     try:
-                        total += float(parts[-1])
+                        totals[n] += float(line.rsplit(" ", 1)[-1])
                     except ValueError:
                         pass
-        return total
     except Exception:
-        return 0.0
+        pass
+    return totals
 
-def stream_engine(client, prompt: str, max_tokens: int, temp: float, output_slot):
-    start_accepted = get_vllm_counter("vllm:spec_decode_num_accepted_tokens_total")
-    start_drafted = get_vllm_counter("vllm:spec_decode_num_draft_tokens_total")
+SPEC_COUNTERS = [ACCEPTED_METRIC, DRAFTED_METRIC, DRAFTS_METRIC]
+
+def spec_stats(before: dict, after: dict) -> dict:
+    accepted = after[ACCEPTED_METRIC] - before[ACCEPTED_METRIC]
+    drafted = after[DRAFTED_METRIC] - before[DRAFTED_METRIC]
+    steps = after[DRAFTS_METRIC] - before[DRAFTS_METRIC]
+    if steps <= 0 and drafted > 0:
+        steps = drafted / NUM_SPEC_TOKENS   # fallback if this vLLM version lacks num_drafts
+    return {
+        "run_accepted": int(accepted),
+        "run_drafted": int(drafted),
+        "run_steps": int(round(steps)),
+        "run_rate": (accepted / drafted) * 100 if drafted > 0 else 0.0,
+        # Mean acceptance length: tokens gained per verification step = 1 + accepted/steps.
+        "mean_accept_len": (1 + accepted / steps) if steps > 0 else 0.0,
+    }
+
+# ==============================================================================
+# SINGLE REQUEST (streaming, so we can measure TTFT and TPOT)
+# ==============================================================================
+
+def stream_engine(client, prompt, max_tokens, temp, output_slot=None, fixed_length=False, is_spec=False):
+    before = get_vllm_counters(SPEC_COUNTERS) if is_spec else None
 
     start = time.perf_counter()
     first_token_time = None
     text = ""
     token_count = 0
     prompt_token_count = None
+    extra = {"ignore_eos": True} if fixed_length else {}
 
-    try:
-        stream = client.chat.completions.create(
-            model=TARGET_MODEL, messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_tokens, temperature=temp, stream=True,
-            stream_options={"include_usage": True}
-        )
-        for chunk in stream:
-            if chunk.choices and len(chunk.choices) > 0:
-                delta = chunk.choices[0].delta.content or ""
-                if delta:
-                    if first_token_time is None:
-                        first_token_time = time.perf_counter() - start
-                    text += delta
+    stream = client.chat.completions.create(
+        model=TARGET_MODEL, messages=[{"role": "user", "content": prompt}],
+        max_tokens=max_tokens, temperature=temp, stream=True,
+        stream_options={"include_usage": True}, extra_body=extra or None,
+    )
+    for chunk in stream:
+        if chunk.choices:
+            delta = chunk.choices[0].delta.content or ""
+            if delta:
+                if first_token_time is None:
+                    first_token_time = time.perf_counter() - start
+                text += delta
+                if output_slot is not None:
                     output_slot.markdown(text)
-            if hasattr(chunk, "usage") and chunk.usage is not None:
-                token_count = chunk.usage.completion_tokens
-                if hasattr(chunk.usage, "prompt_tokens"):
-                    prompt_token_count = chunk.usage.prompt_tokens
+        if getattr(chunk, "usage", None) is not None:
+            token_count = chunk.usage.completion_tokens
+            prompt_token_count = chunk.usage.prompt_tokens
 
-        total_latency = time.perf_counter() - start
-        if token_count == 0:
-            token_count = len(text.split())
+    total_latency = time.perf_counter() - start
+    if token_count == 0:
+        token_count = len(text.split())
+    if first_token_time is None:
+        first_token_time = total_latency
 
-        tps = token_count / total_latency if total_latency > 0 else 0
-        time.sleep(0.4)
-        
-        end_accepted = get_vllm_counter("vllm:spec_decode_num_accepted_tokens_total")
-        end_drafted = get_vllm_counter("vllm:spec_decode_num_draft_tokens_total")
-        run_accepted = end_accepted - start_accepted
-        run_drafted = end_drafted - start_drafted
-        run_rate = (run_accepted / run_drafted) * 100 if run_drafted > 0 else 0.0
+    # Decode-phase metrics: everything after the first token.
+    decode_time = max(0.0, total_latency - first_token_time)
+    tpot = decode_time / (token_count - 1) if token_count > 1 else 0.0
 
-        return {
-            "latency": total_latency, "ttft": first_token_time, "tokens": token_count, 
-            "prompt_tokens": prompt_token_count or count_prompt_tokens(prompt),
-            "tokens_per_second": tps, "text": text, "run_rate": run_rate,
-            "run_accepted": int(run_accepted), "run_drafted": int(run_drafted)
-        }
-    except Exception as e:
-        output_slot.error(f"Inference Fault: {e}")
+    result = {
+        "latency": total_latency,
+        "ttft": first_token_time,
+        "tpot_ms": tpot * 1000,
+        "decode_tps": (1 / tpot) if tpot > 0 else 0.0,
+        "e2e_tps": token_count / total_latency if total_latency > 0 else 0.0,
+        "tokens": token_count,
+        "prompt_tokens": prompt_token_count or count_prompt_tokens(prompt),
+        "text": text,
+    }
+    if is_spec:
+        time.sleep(0.3)  # let the counters settle
+        result.update(spec_stats(before, get_vllm_counters(SPEC_COUNTERS)))
+    return result
+
+def warm_up(client):
+    """One short request so the first measured run doesn't include start-up costs."""
+    try:
+        client.chat.completions.create(
+            model=TARGET_MODEL, messages=[{"role": "user", "content": "Say hello."}],
+            max_tokens=8, temperature=0.0,
+        )
+    except Exception:
+        pass
+
+NUMERIC_KEYS = ["latency", "ttft", "tpot_ms", "decode_tps", "e2e_tps", "tokens", "prompt_tokens",
+                "run_accepted", "run_drafted", "run_steps", "run_rate", "mean_accept_len"]
+
+def median_result(runs):
+    if not runs:
         return None
+    out = {"text": runs[-1]["text"], "n_runs": len(runs)}
+    for k in NUMERIC_KEYS:
+        vals = [r[k] for r in runs if k in r and r[k] is not None]
+        if vals:
+            out[k] = statistics.median(vals)
+    return out
 
 # ==============================================================================
 # UI SETUP & ROUTING
 # ==============================================================================
 
-st.set_page_config(page_title="vLLM Inference Optimization Arena", layout="wide")
-st.title("vLLM Live Inference Optimization Arena")
+st.set_page_config(page_title="vLLM Speculative Decoding Benchmark", layout="wide")
+st.title("vLLM Speculative Decoding Benchmark")
 
 st.sidebar.header("Navigation")
 demo = st.sidebar.radio("Select Demo Scenario", [
-    "Demo 1: Workload Predictability", 
-    "Demo 2: Context Scaling", 
+    "Demo 1: Workload Predictability",
+    "Demo 2: Context Scaling",
     "Demo 3: Concurrency Scaling"
 ])
 
+st.sidebar.divider()
+st.sidebar.header("Run settings")
+repeats = st.sidebar.slider("Repeats per server (median reported)", 1, 5, 3)
+do_warmup = st.sidebar.checkbox("Warm up each server before measuring", value=True)
+st.sidebar.caption(
+    f"Servers are measured **one at a time** (baseline, then speculative), so they never "
+    f"compete for the GPU. Draft tokens per step (k): **{NUM_SPEC_TOKENS}**."
+)
+
 if demo == "Demo 1: Workload Predictability":
-    temperature = 0.0
-    st.sidebar.caption("Temperature fixed at 0.0 for controlled comparison")
-    max_tokens = st.sidebar.slider("Max Output Tokens", 128, 1024, 384, step=64)
-    
     st.markdown("### DEMO 1 — WORKLOAD PREDICTABILITY")
+    temperature = st.sidebar.select_slider("Temperature", options=[0.0, 0.3, 0.5, 0.7, 1.0], value=0.0)
+    max_tokens = st.sidebar.slider("Max Output Tokens", 128, 1024, 384, step=64)
+    fixed_length = st.sidebar.checkbox(
+        "Fixed output length (ignore EOS)", value=False,
+        help="Forces every response to exactly Max Output Tokens, so output length is identical across tasks. "
+             "TPOT is already length-independent, so this mainly matters for end-to-end latency."
+    )
+
     workload_type = st.radio("Workload Type:", ["Predictable", "Open-Ended"], horizontal=True)
-    
     if workload_type == "Predictable":
-        active_key = st.selectbox("Example:", ["JSON Generation", "Structured Extraction"])
-        prompt = JSON_PROMPT if active_key == "JSON Generation" else EXTRACTION_PROMPT
+        task = st.selectbox("Example:", ["JSON Generation", "Structured Extraction"])
+        prompt = JSON_PROMPT if task == "JSON Generation" else EXTRACTION_PROMPT
     else:
-        active_key = st.selectbox("Example:", ["Creative Story", "Brainstorming Incident Response"])
-        prompt = CREATIVE_PROMPT if active_key == "Creative Story" else BRAINSTORM_PROMPT
-        
+        task = st.selectbox("Example:", ["Creative Story", "Brainstorming Incident Response"])
+        prompt = CREATIVE_PROMPT if task == "Creative Story" else BRAINSTORM_PROMPT
+    active_key = f"D1 · {task} · T={temperature} · max={max_tokens}{' · fixed' if fixed_length else ''}"
+
     with st.expander("View Prompt Running on Stage", expanded=True):
         st.code(prompt, language="text")
 
 elif demo == "Demo 2: Context Scaling":
-    temperature = 0.0  
-    max_tokens = 128   
-    
     st.markdown("### DEMO 2 — CONTEXT SCALING")
-    context_tier = st.radio("Context:", ["8K", "24K", "32K"], horizontal=True)
-    
+    temperature = 0.0
+    max_tokens = st.sidebar.slider("Output Tokens", 64, 512, 128, step=64)
+    fixed_length = st.sidebar.checkbox(
+        "Fixed output length (ignore EOS)", value=True,
+        help="Keeps the output identical across context sizes, so input length is the only variable."
+    )
+    context_tier = st.radio("Context:", list(D2_TARGETS.keys()), horizontal=True)
+
     prompt, meta = get_d2_prompt(context_tier)
+    active_key = f"D2 · {context_tier} · out={max_tokens}{' · fixed' if fixed_length else ''}"
     st.markdown(f"**Actual Input Tokens:** `{meta['estimated_tokens']:,}`")
-    
+
     with st.expander("Inspect Synthetic Audit Context", expanded=True):
         st.write(f"**Target context:** {meta['target_tokens']:,} tokens")
         st.write(f"**Synthetic records:** {meta['records']:,}")
@@ -290,251 +356,241 @@ elif demo == "Demo 2: Context Scaling":
         evidence_preview = prompt[max(0, needle_idx-250):needle_idx+len(NEEDLE_RECORD)+250] if needle_idx >= 0 else NEEDLE_RECORD
         st.text(prompt[:900] + "\n\n [... VARIED RECORDS OMITTED ...]\n\n" + evidence_preview + "\n\n [... VARIED RECORDS OMITTED ...]\n\n" + AUDIT_INSTRUCTION)
 
+    # Summary across all context tiers run so far
+    d2_rows = []
+    for tier in D2_TARGETS:
+        key = f"D2 · {tier} · out={max_tokens}{' · fixed' if fixed_length else ''}"
+        r = st.session_state.results.get(key)
+        if r and r.get("base") and r.get("spec"):
+            b, s = r["base"], r["spec"]
+            d2_rows.append({
+                "Context": tier,
+                "Input tokens": int(b["prompt_tokens"]),
+                "Base TTFT (s)": round(b["ttft"], 3), "Spec TTFT (s)": round(s["ttft"], 3),
+                "Base TPOT (ms)": round(b["tpot_ms"], 2), "Spec TPOT (ms)": round(s["tpot_ms"], 2),
+                "Decode speedup": f"{b['tpot_ms'] / max(1e-6, s['tpot_ms']):.2f}x",
+                "E2E speedup": f"{b['latency'] / max(1e-6, s['latency']):.2f}x",
+                "Acceptance": f"{s.get('run_rate', 0):.1f}%",
+            })
+    if d2_rows:
+        with st.expander("All context tiers so far", expanded=False):
+            st.table(pd.DataFrame(d2_rows))
+
 else:
-    # DEMO 3 UI ROUTING
+    # ==========================================================================
+    # DEMO 3 — CONCURRENCY
+    # ==========================================================================
     st.markdown("### DEMO 3 — CONCURRENCY SCALING")
     st.markdown("**How does increasing server load affect the benefit of speculative decoding?**")
-    
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-        st.markdown("**Concurrency Levels:** 1, 4, 8, 16, 32")
-    with col_c2:
-        requests_per_test = st.slider("Requests per Test Tier:", 20, 100, 50, step=10)
+    st.caption("Start the servers with `./scripts/start_vllm.sh demo3` for this demo.")
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    levels = [1, 2, 4, 8, 16, 32]
+    col_c1, col_c2, col_c3 = st.columns(3)
+    with col_c1:
+        st.markdown(f"**Concurrency levels:** {', '.join(map(str, levels))}")
+    with col_c2:
+        requests_per_test = st.slider("Requests per level:", 16, 128, 64, step=16)
+    with col_c3:
+        d3_max_tokens = st.slider("Output tokens per request:", 64, 512, 256, step=64)
+    d3_fixed = st.checkbox("Fixed output length (ignore EOS)", value=True)
+
     run_concurrency_btn = st.button("RUN CONCURRENCY TEST", type="primary")
 
+    def fire_request(client, p):
+        """Streaming request so we get per-request TTFT and TPOT."""
+        try:
+            return stream_engine(client, p, d3_max_tokens, 0.0, None, fixed_length=d3_fixed)
+        except Exception:
+            return None
+
+    def run_load(client, c, is_spec):
+        before = get_vllm_counters(SPEC_COUNTERS) if is_spec else None
+        start = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=c) as executor:
+            results = list(executor.map(lambda _: fire_request(client, JSON_PROMPT), range(requests_per_test)))
+        duration = time.perf_counter() - start
+        ok = [r for r in results if r]
+        out = {
+            "duration": duration,
+            "ok": len(ok),
+            "out_tps": sum(r["tokens"] for r in ok) / duration if duration > 0 else 0.0,
+            "req_s": len(ok) / duration if duration > 0 else 0.0,
+            "tpot_ms": statistics.median([r["tpot_ms"] for r in ok]) if ok else 0.0,
+            "ttft": statistics.median([r["ttft"] for r in ok]) if ok else 0.0,
+        }
+        if is_spec:
+            time.sleep(0.3)
+            out.update(spec_stats(before, get_vllm_counters(SPEC_COUNTERS)))
+        return out
+
     if run_concurrency_btn:
-        levels = [1, 4, 8, 16, 32]
         results_data = []
-        status_box = st.status("Running automated concurrency test suite...", expanded=True)
-        
-        ctx = get_script_run_ctx()
-        def fire_request(client, p):
-            add_script_run_ctx(threading.current_thread(), ctx)
-            try:
-                client.chat.completions.create(
-                    model=TARGET_MODEL, messages=[{"role": "user", "content": p}],
-                    max_tokens=32, temperature=0.0
-                )
-                return True
-            except Exception:
-                return False
+        status_box = st.status("Running concurrency test...", expanded=True)
+        if do_warmup:
+            status_box.write("Warming up both servers...")
+            warm_up(baseline_client)
+            warm_up(spec_client)
 
         for c in levels:
-            status_box.update(label=f"Testing Concurrency Level: {c}...")
-            
-            # Baseline Load Test
-            b_start = time.perf_counter()
-            with ThreadPoolExecutor(max_workers=c) as executor:
-                futures = [executor.submit(fire_request, baseline_client, JSON_PROMPT) for _ in range(requests_per_test)]
-                for f in futures:
-                    f.result()
-            b_dur = time.perf_counter() - b_start
-            b_rps = requests_per_test / b_dur if b_dur > 0 else 0.0
-
-            # Speculative Load Test
-            s_start = time.perf_counter()
-            with ThreadPoolExecutor(max_workers=c) as executor:
-                futures = [executor.submit(fire_request, spec_client, JSON_PROMPT) for _ in range(requests_per_test)]
-                for f in futures:
-                    f.result()
-            s_dur = time.perf_counter() - s_start
-            s_rps = requests_per_test / s_dur if s_dur > 0 else 0.0
-
-            gain = s_rps / max(0.1, b_rps)
-            
-            # Realistic simulation / telemetry blend for GPU utilization
-            b_gpu = min(98, int(30 + c * 1.8 + random.randint(-2, 2)))
-            s_gpu = min(99, int(42 + c * 1.5 + random.randint(-2, 2)))
+            status_box.update(label=f"Concurrency {c}: baseline...")
+            b = run_load(baseline_client, c, is_spec=False)
+            status_box.update(label=f"Concurrency {c}: speculative...")
+            s = run_load(spec_client, c, is_spec=True)
+            status_box.write(f"Concurrency {c} done.")
 
             results_data.append({
                 "Concurrency": c,
-                "Baseline req/s": round(b_rps, 1),
-                "Spec req/s": round(s_rps, 1),
-                "Throughput Gain": f"{gain:.2f}x",
-                "Baseline GPU": f"{b_gpu}%",
-                "Spec GPU": f"{s_gpu}%"
+                "Baseline out tok/s": round(b["out_tps"], 1),
+                "Spec out tok/s": round(s["out_tps"], 1),
+                "Throughput gain": f"{s['out_tps'] / max(1e-6, b['out_tps']):.2f}x",
+                "Baseline TPOT (ms)": round(b["tpot_ms"], 2),
+                "Spec TPOT (ms)": round(s["tpot_ms"], 2),
+                "Spec acceptance": f"{s.get('run_rate', 0):.1f}%",
+                "Failed requests (b/s)": f"{requests_per_test - b['ok']}/{requests_per_test - s['ok']}",
             })
 
-        status_box.update(label="Concurrency scaling test completed successfully!", state="complete", expanded=False)
+        status_box.update(label="Concurrency test complete.", state="complete", expanded=False)
         st.session_state.d3_results = results_data
 
     st.markdown("### Concurrency Scaling Results")
     if st.session_state.d3_results:
         df_res = pd.DataFrame(st.session_state.d3_results)
         st.table(df_res)
+        st.line_chart(
+            df_res.set_index("Concurrency")[["Baseline out tok/s", "Spec out tok/s"]],
+            x_label="Concurrent requests", y_label="Output tokens / s",
+        )
+        st.download_button("Download results (CSV)", df_res.to_csv(index=False), "demo3_results.csv")
     else:
-        # Initial placeholder table matching user structure
-        default_data = [
-            {"Concurrency": 1, "Baseline req/s": 1.8, "Spec req/s": 2.7, "Throughput Gain": "1.50x", "Baseline GPU": "34%", "Spec GPU": "46%"},
-            {"Concurrency": 4, "Baseline req/s": 5.4, "Spec req/s": 7.0, "Throughput Gain": "1.30x", "Baseline GPU": "55%", "Spec GPU": "68%"},
-            {"Concurrency": 8, "Baseline req/s": 8.1, "Spec req/s": 9.2, "Throughput Gain": "1.14x", "Baseline GPU": "74%", "Spec GPU": "86%"},
-            {"Concurrency": 16, "Baseline req/s": 10.3, "Spec req/s": 10.1, "Throughput Gain": "0.98x", "Baseline GPU": "91%", "Spec GPU": "97%"},
-            {"Concurrency": 32, "Baseline req/s": 10.8, "Spec req/s": 9.7, "Throughput Gain": "0.90x", "Baseline GPU": "98%", "Spec GPU": "99%"}
-        ]
-        st.table(pd.DataFrame(default_data))
-        st.info("Click **RUN CONCURRENCY TEST** above to execute live against your local vLLM endpoints.")
+        st.info("Click **RUN CONCURRENCY TEST** to measure both servers. Baseline and speculative "
+                "are tested one after the other at each concurrency level.")
 
     st.stop()
+
+# ==============================================================================
+# DEMOS 1–2: RUN + DISPLAY
+# ==============================================================================
 
 st.divider()
 
 col_btn1, col_btn2 = st.columns([1, 4])
 with col_btn1:
-    execute_race = st.button("Run Experiment", type="primary")
+    execute_run = st.button("Run Experiment", type="primary")
 with col_btn2:
-    if st.button("Clear Playback Matrices"):
-        if demo == "Demo 1: Workload Predictability":
-            st.session_state.d1_state = {k: {"base_res": None, "spec_res": None} for k in st.session_state.d1_state}
-        else:
-            st.session_state.d2_state = {k: {"base_res": None, "spec_res": None} for k in st.session_state.d2_state}
+    if st.button("Clear Results"):
+        st.session_state.results = {}
         st.rerun()
 
-# ==============================================================================
-# RENDER LOGIC (SHARED ENGINE DISPLAY FORMAT)
-# ==============================================================================
-
-if demo == "Demo 1: Workload Predictability":
-    base_res = st.session_state.d1_state[active_key]["base_res"]
-    spec_res = st.session_state.d1_state[active_key]["spec_res"]
-elif demo == "Demo 2: Context Scaling":
-    base_res = st.session_state.d2_state[context_tier]["base_res"]
-    spec_res = st.session_state.d2_state[context_tier]["spec_res"]
-
-metric_col1, metric_col2 = st.columns(2)
-
-with metric_col1:
-    st.subheader("Traditional Baseline Engine")
-    st.markdown("---")
-    
-    st.markdown("**TTFT**")
-    st.markdown(f"### `{base_res['ttft']:.3f}s`" if base_res and base_res.get('ttft') is not None else "`—`")
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("**Decode Throughput**")
-    st.markdown(f"### `{base_res['tokens_per_second']:.1f} tok/s`" if base_res else "`—`")
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("**End-to-End Latency**")
-    st.markdown(f"### `{base_res['latency']:.2f}s`" if base_res else "`—`")
-
-with metric_col2:
-    st.subheader("Speculative Accelerated Engine")
-    st.markdown("---")
-    
-    st.markdown("**TTFT**")
-    if base_res and spec_res and base_res.get('ttft') and spec_res.get('ttft'):
-        ttft_diff = ((spec_res['ttft'] - base_res['ttft']) / base_res['ttft']) * 100
-        st.markdown(f"### `{spec_res['ttft']:.3f}s`")
-        if ttft_diff > 0:
-            st.warning(f"↑ {ttft_diff:.0f}% slower")
-        else:
-            st.success(f"↓ {abs(ttft_diff):.0f}% faster")
-    elif spec_res and spec_res.get('ttft'):
-        st.markdown(f"### `{spec_res['ttft']:.3f}s`")
-    else:
-        st.markdown("`—`")
-
-    st.markdown("**Decode Throughput**")
-    if base_res and spec_res:
-        speedup_val = spec_res['tokens_per_second'] / max(0.1, base_res['tokens_per_second'])
-        pct_increase = ((spec_res['tokens_per_second'] - base_res['tokens_per_second']) / max(0.1, base_res['tokens_per_second'])) * 100
-        st.markdown(f"### `{spec_res['tokens_per_second']:.1f} tok/s`")
-        st.success(f"↑ {speedup_val:.2f}× (+{pct_increase:.0f}%)")
-    elif spec_res:
-        st.markdown(f"### `{spec_res['tokens_per_second']:.1f} tok/s`")
-    else:
-        st.markdown("`—`")
-
-    st.markdown("**End-to-End Latency**")
-    if base_res and spec_res:
-        lat_reduction = ((base_res['latency'] - spec_res['latency']) / max(0.001, base_res['latency'])) * 100
-        st.markdown(f"### `{spec_res['latency']:.2f}s`")
-        if lat_reduction > 0:
-            st.info(f"↓ {lat_reduction:.0f}%")
-        else:
-            st.warning(f"↑ {abs(lat_reduction):.0f}% slower")
-    elif spec_res:
-        st.markdown(f"### `{spec_res['latency']:.2f}s`")
-    else:
-        st.markdown("`—`")
-
-    st.markdown("**Draft Acceptance Rate**")
-    st.markdown(f"### `{spec_res['run_rate']:.1f}%`" if spec_res else "`—`")
-
-st.divider()
-
-# Advanced Speculative Metrics Expander
-with st.expander("▼ Advanced Speculative Metrics"):
-    if spec_res:
-        acc_tokens = spec_res.get('run_accepted', 0)
-        draft_tokens = spec_res.get('run_drafted', 0)
-        steps = max(1, draft_tokens // 4)
-        mean_len = (1 + (acc_tokens / steps)) if steps > 0 else 0.0
-        
-        col_adv1, col_adv2, col_adv3 = st.columns(3)
-        col_adv1.metric("Mean Accepted Tokens / Step", f"{mean_len:.2f}")
-        col_adv2.metric("Accepted Draft Tokens", f"{acc_tokens:,}")
-        col_adv3.metric("Proposed Draft Tokens", f"{draft_tokens:,}")
-    else:
-        st.info("_Run an experiment to populate speculative telemetry metrics._")
-
-st.divider()
-
-# Response Output Workspaces
 st.markdown("### MODEL OUTPUTS")
 out_col1, out_col2 = st.columns(2)
 with out_col1:
     st.caption("Baseline Output")
     baseline_output_slot = st.empty()
-    if base_res:
-        baseline_output_slot.markdown(base_res['text'])
-    else:
-        baseline_output_slot.markdown("_Awaiting run..._")
-
 with out_col2:
     st.caption("Speculative Output")
     spec_output_slot = st.empty()
-    if spec_res:
-        spec_output_slot.markdown(spec_res['text'])
+
+if execute_run:
+    status = st.status("Running...", expanded=True)
+    try:
+        if do_warmup:
+            status.write("Warming up both servers...")
+            warm_up(baseline_client)
+            warm_up(spec_client)
+
+        base_runs, spec_runs = [], []
+        for i in range(repeats):
+            # Strictly sequential: the speculative request starts only after the baseline finishes.
+            status.update(label=f"Run {i+1}/{repeats}: baseline...")
+            base_runs.append(stream_engine(baseline_client, prompt, max_tokens, temperature,
+                                           baseline_output_slot, fixed_length=fixed_length))
+            status.update(label=f"Run {i+1}/{repeats}: speculative...")
+            spec_runs.append(stream_engine(spec_client, prompt, max_tokens, temperature,
+                                           spec_output_slot, fixed_length=fixed_length, is_spec=True))
+
+        st.session_state.results[active_key] = {
+            "base": median_result(base_runs),
+            "spec": median_result(spec_runs),
+        }
+        status.update(label="Done.", state="complete", expanded=False)
+    except Exception as e:
+        status.update(label=f"Inference error: {e}", state="error")
+
+res = st.session_state.results.get(active_key, {})
+base_res, spec_res = res.get("base"), res.get("spec")
+
+if base_res and not execute_run:
+    baseline_output_slot.markdown(base_res["text"])
+elif not base_res:
+    baseline_output_slot.markdown("_Awaiting run..._")
+if spec_res and not execute_run:
+    spec_output_slot.markdown(spec_res["text"])
+elif not spec_res:
+    spec_output_slot.markdown("_Awaiting run..._")
+
+st.divider()
+if base_res:
+    st.caption(f"Median of {base_res.get('n_runs', 1)} run(s) per server · {active_key}")
+
+metric_col1, metric_col2 = st.columns(2)
+
+def show(label, value):
+    st.markdown(f"**{label}**")
+    st.markdown(f"### `{value}`")
+
+with metric_col1:
+    st.subheader("Baseline")
+    st.markdown("---")
+    if base_res:
+        show("TTFT", f"{base_res['ttft']:.3f}s")
+        show("TPOT (decode)", f"{base_res['tpot_ms']:.2f} ms/token")
+        show("Decode speed", f"{base_res['decode_tps']:.1f} tok/s")
+        show("End-to-End Latency", f"{base_res['latency']:.2f}s")
+        st.caption(f"{int(base_res['tokens'])} output tokens · {int(base_res['prompt_tokens']):,} input tokens")
     else:
-        spec_output_slot.markdown("_Awaiting run..._")
+        st.markdown("`—`")
 
-# ==============================================================================
-# EXECUTION RACE THREAD LOOPER
-# ==============================================================================
+with metric_col2:
+    st.subheader("Speculative")
+    st.markdown("---")
+    if spec_res and base_res:
+        ttft_diff = (spec_res["ttft"] - base_res["ttft"]) / max(1e-6, base_res["ttft"]) * 100
+        show("TTFT", f"{spec_res['ttft']:.3f}s")
+        (st.warning if ttft_diff > 0 else st.success)(
+            f"{'↑' if ttft_diff > 0 else '↓'} {abs(ttft_diff):.0f}% {'slower' if ttft_diff > 0 else 'faster'}")
 
-if execute_race:
-    temp_slot_b = st.empty()
-    temp_slot_s = st.empty()
-    temp_slot_b.info("Warming baseline runtime engine context...")
-    temp_slot_s.info("Assembling speculative proposal matrix layers...")
+        decode_speedup = base_res["tpot_ms"] / max(1e-6, spec_res["tpot_ms"])
+        show("TPOT (decode)", f"{spec_res['tpot_ms']:.2f} ms/token")
+        (st.success if decode_speedup >= 1 else st.warning)(f"Decode speedup: {decode_speedup:.2f}×")
 
-    ctx = get_script_run_ctx()
-    def run_with_runtime_context(client, p, max_tok, t, slot):
-        add_script_run_ctx(threading.current_thread(), ctx)
-        return stream_engine(client, p, max_tok, t, slot)
+        show("Decode speed", f"{spec_res['decode_tps']:.1f} tok/s")
 
-    dummy_slot_b = st.empty()
-    dummy_slot_s = st.empty()
+        e2e_speedup = base_res["latency"] / max(1e-6, spec_res["latency"])
+        show("End-to-End Latency", f"{spec_res['latency']:.2f}s")
+        (st.info if e2e_speedup >= 1 else st.warning)(f"End-to-end speedup: {e2e_speedup:.2f}×")
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        future_baseline = executor.submit(run_with_runtime_context, baseline_client, prompt, max_tokens, temperature, dummy_slot_b)
-        future_spec = executor.submit(run_with_runtime_context, spec_client, prompt, max_tokens, temperature, dummy_slot_s)
-        while not (future_baseline.done() and future_spec.done()):
-            time.sleep(0.1)
+        show("Draft Acceptance Rate", f"{spec_res.get('run_rate', 0):.1f}%")
+        show("Mean Acceptance Length", f"{spec_res.get('mean_accept_len', 0):.2f} (max {NUM_SPEC_TOKENS + 1})")
+        st.caption(f"{int(spec_res['tokens'])} output tokens")
+    else:
+        st.markdown("`—`")
 
-    temp_slot_b.empty()
-    temp_slot_s.empty()
+if spec_res:
+    with st.expander("▼ Advanced Speculative Metrics"):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Accepted Draft Tokens", f"{int(spec_res.get('run_accepted', 0)):,}")
+        c2.metric("Proposed Draft Tokens", f"{int(spec_res.get('run_drafted', 0)):,}")
+        c3.metric("Verification Steps", f"{int(spec_res.get('run_steps', 0)):,}")
+        st.caption("Counters are read from the speculative server's /metrics before and after each run. "
+                   "Mean acceptance length = 1 + accepted ÷ steps.")
 
-    base_res = future_baseline.result()
-    spec_res = future_spec.result()
-
-    if demo == "Demo 1: Workload Predictability":
-        st.session_state.d1_state[active_key]["base_res"] = base_res
-        st.session_state.d1_state[active_key]["spec_res"] = spec_res
-    elif demo == "Demo 2: Context Scaling":
-        st.session_state.d2_state[context_tier]["base_res"] = base_res
-        st.session_state.d2_state[context_tier]["spec_res"] = spec_res
-    st.rerun()
+# Export everything measured so far
+if st.session_state.results:
+    rows = []
+    for key, r in st.session_state.results.items():
+        for side in ("base", "spec"):
+            if r.get(side):
+                row = {"experiment": key, "server": side}
+                row.update({k: v for k, v in r[side].items() if k != "text"})
+                rows.append(row)
+    st.download_button("Download all results (CSV)", pd.DataFrame(rows).to_csv(index=False), "results.csv")

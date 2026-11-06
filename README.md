@@ -11,7 +11,6 @@ and visualizes:
 
 - Throughput metrics
 - Acceptance rate metrics
-- GPU utilization
 - Latency metrics
 - Baseline vs speculative performance
 
@@ -46,7 +45,7 @@ Starts:
   - Streamlit dashboard
   - Grafana/ Prometheus docker containers
   ↓
-Run vllm_server.sh
+Run start_vllm.sh <profile>
   ↓
 Starts:
   - Baseline vLLM server (port 8000)
@@ -107,9 +106,11 @@ This project tracks performance from two perspectives: **Client-Side User Experi
 The Streamlit frontend provides real-time, user-facing experiment metrics to compare standard inference against speculative decoding side-by-side..
 
 ### **Captured UX Metrics**
-* **Total Latency (s):** Wall-clock time from request initiation to the final token.
-* **Generated Tokens:** The total count of tokens in the final output.
-* **Throughput (tokens/sec):** The generation speed as experienced by the user.
+* **TTFT (s):** Time to first token, mostly the prefill phase.
+* **TPOT (ms/token):** Time per output token after the first, i.e. the decode phase.
+* **End-to-End Latency (s):** Wall-clock time from request to final token.
+* **Draft Acceptance Rate and Mean Acceptance Length:** how many draft tokens the target accepted, and how many tokens each verification step produced on average.
+* **Demo 3:** output tokens/second, median TPOT and acceptance rate at each concurrency level. Results can be downloaded as CSV.
 
 ## 2. Grafana & Prometheus (Server-Side Telemetry)
 For infrastructure-level insights, server-side metrics exposed by vLLM are scraped and visualized to show exactly how the engine behaves under the hood.
@@ -233,15 +234,14 @@ Run (in this order):
 export HF_TOKEN="hf_xxx"
 ./scripts/setup_env.sh
 ./scripts/start_monitor.sh
-./scripts/start_vllm.sh
+./scripts/start_vllm.sh demo12      # profile for Demos 1-2
 ```
 
-The scripts prints:
+`start_vllm.sh` waits until each server passes its health check before continuing, and prints:
 
 ```text
 Baseline vLLM:    http://<instance-ip>:8000
 Speculative vLLM: http://<instance-ip>:8001
-Streamlit:        http://<instance-ip>:8501
 ```
 
 Open the dashboard in your browser:
@@ -250,24 +250,26 @@ Open the dashboard in your browser:
 http://<instance-ip>:8501
 ```
 
-## 8. Updating Runtime Configuration Settings
-
-To change runtime settings such as:
-
-- GPU memory utilization
-- max model length
-- speculative token count
-- ports
-- model selection
-
-```text
-config.env
-```
-
-Example:
+When you're ready for Demo 3, restart the servers with the concurrency profile:
 
 ```bash
-GPU_MEMORY_UTILIZATION="0.46"
+./scripts/start_vllm.sh demo3
 ```
 
-Then restart the corresponding vLLM server.
+## How the benchmarks keep the comparison fair
+
+- **One server at a time.** Both servers stay loaded on the GPU, but the app measures them strictly in sequence: the speculative request starts only after the baseline request has finished. An idle server holds memory but uses no compute, so it doesn't affect the other's numbers.
+- **Warm-up and repeats.** By default, each server gets a short warm-up request, and every experiment is run 3 times per server; the dashboard shows the median.
+- **Decode measured separately.** TTFT covers the prompt (prefill); TPOT covers generation (decode) only. Speculative decoding targets decode, so compare TPOT to see its effect and end-to-end latency to see what users experience.
+- **Speculative metrics per run.** Acceptance rate and mean acceptance length are computed from the speculative server's `/metrics` counters before and after each run.
+- **Memory split.** The speculative server's GPU slice also holds the draft model's weights and KV cache, so the two servers don't get identical KV-cache room even with equal settings. That's why the profiles give it a larger share.
+
+## 8. Updating Runtime Configuration Settings
+
+Server settings live in `config.env`:
+
+- models (`TARGET_MODEL_HF`, `DRAFT_MODEL_HF`)
+- draft tokens per step (`NUM_SPEC_TOKENS`)
+- per-profile GPU memory share, max model length and max concurrent sequences (`DEMO12_*`, `DEMO3_*`)
+
+After changing them, restart the servers with `./scripts/start_vllm.sh <profile>`, and restart the dashboard if you changed `NUM_SPEC_TOKENS`.

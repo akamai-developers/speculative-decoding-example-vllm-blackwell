@@ -1,5 +1,9 @@
+# Pin vLLM to the version you benchmark with (run: pip show vllm), so others
+# can reproduce your numbers: metric names and spec-decode options change between releases.
 vllm>=0.4.0
 huggingface_hub
 streamlit
 requests
+openai
+pandas
 prometheus-client
